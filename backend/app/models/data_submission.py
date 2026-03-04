@@ -33,6 +33,7 @@ class DataSubmission(Base):
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    image_s3_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     trained: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

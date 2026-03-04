@@ -91,6 +91,44 @@ export const api = {
       }
     }
   },
+
+  sendChatWithImage: async function* (
+    message: string,
+    image: File,
+    conversationId?: string,
+  ) {
+    const token = localStorage.getItem("token");
+    const formData = new FormData();
+    formData.append("message", message);
+    formData.append("image", image);
+    if (conversationId) formData.append("conversation_id", conversationId);
+
+    const res = await fetch(`${API_URL}/api/v1/chat/send-with-image`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Chat error ${res.status}`);
+    }
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6);
+          if (data === "[DONE]") return;
+          yield data;
+        }
+      }
+    }
+  },
 };
 
 export interface User {
@@ -136,6 +174,7 @@ export interface DataSubmission {
   content_type: string;
   status: string;
   title: string | null;
+  image_s3_key: string | null;
   trained: boolean;
   created_at: string;
 }

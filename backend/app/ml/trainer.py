@@ -2,15 +2,16 @@ import asyncio
 import io
 import logging
 import os
-import time
+import random
 
 import numpy as np
 import torch
 import torch.nn as nn
 
-from app.ml.model import TinyGPT, TinyGPTConfig
+from app.ml.model import TinyGPT, TinyGPTConfig, VisionEncoder
 from app.ml.tokenizer import CharTokenizer
 from app.ml.tiling import TileTask, assemble_tiles, decompose_matmul
+from app.ml.vision import load_image_tensor_from_s3, delete_image_from_s3
 from app.core.config import (
     TILE_SIZE,
     S3_BUCKET,
@@ -44,8 +45,10 @@ class TrainingOrchestrator:
     def __init__(self):
         self.cfg = TinyGPTConfig()
         self.model = TinyGPT(self.cfg)
+        self.vision_encoder = VisionEncoder(self.cfg)
         self.tokenizer = CharTokenizer()
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=3e-4)
+        all_params = list(self.model.parameters()) + list(self.vision_encoder.parameters())
+        self.optimizer = torch.optim.Adam(all_params, lr=3e-4)
         self.loss_fn = nn.CrossEntropyLoss()
         self.step = 0
         self.current_loss = 0.0
@@ -64,6 +67,8 @@ class TrainingOrchestrator:
                 buf.seek(0)
                 state = torch.load(buf, map_location="cpu", weights_only=True)
                 self.model.load_state_dict(state["model"])
+                if "vision_encoder" in state:
+                    self.vision_encoder.load_state_dict(state["vision_encoder"])
                 self.optimizer.load_state_dict(state["optimizer"])
                 self.step = state.get("step", 0)
                 self.current_loss = state.get("loss", 0.0)
@@ -78,6 +83,8 @@ class TrainingOrchestrator:
         if os.path.exists(path):
             state = torch.load(path, map_location="cpu", weights_only=True)
             self.model.load_state_dict(state["model"])
+            if "vision_encoder" in state:
+                self.vision_encoder.load_state_dict(state["vision_encoder"])
             self.optimizer.load_state_dict(state["optimizer"])
             self.step = state.get("step", 0)
             self.current_loss = state.get("loss", 0.0)
@@ -86,6 +93,7 @@ class TrainingOrchestrator:
     def save_checkpoint(self):
         state = {
             "model": self.model.state_dict(),
+            "vision_encoder": self.vision_encoder.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "step": self.step,
             "loss": self.current_loss,
@@ -187,13 +195,129 @@ class TrainingOrchestrator:
     ) -> np.ndarray:
         return assemble_tiles(tiles, M, N, TILE_SIZE)
 
-    async def run_training_step(self, dispatch_fn) -> float:
-        self.model.train()
-        x, y = self.get_batch()
+    async def get_vision_batch(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int]] | None:
+        """Load image tensors + paired captions from DB for vision training."""
+        from app.core.database import async_session
+        from app.models.data_submission import DataSubmission, ContentType, SubmissionStatus
+        from sqlalchemy import select
 
-        logits = self.model(x)
-        B, T, V = logits.shape
-        loss = self.loss_fn(logits.view(B * T, V), y.view(B * T))
+        try:
+            async with async_session() as db:
+                result = await db.execute(
+                    select(DataSubmission.id, DataSubmission.extracted_text, DataSubmission.image_s3_key)
+                    .where(DataSubmission.content_type == ContentType.IMAGE)
+                    .where(DataSubmission.status == SubmissionStatus.READY)
+                    .where(DataSubmission.image_s3_key.isnot(None))
+                    .where(DataSubmission.trained == False)  # noqa: E712
+                    .limit(8)
+                )
+                rows = result.all()
+        except Exception as e:
+            log.warning("Failed to query vision data: %s", e)
+            return None
+
+        if not rows:
+            return None
+
+        images = []
+        captions = []
+        ids = []
+        for sub_id, text, _s3_key in rows:
+            tensor = load_image_tensor_from_s3(sub_id)
+            if tensor is None:
+                continue
+            images.append(tensor)
+            captions.append(text or "an image")
+            ids.append(sub_id)
+
+        if not images:
+            return None
+
+        image_batch = torch.stack(images)  # [B, 3, 224, 224]
+
+        # Tokenize captions into target sequences
+        seq_len = 128
+        all_x = []
+        all_y = []
+        for caption in captions:
+            tokens = self.tokenizer.encode(caption)
+            if len(tokens) < 2:
+                tokens = self.tokenizer.encode("an image")
+            data = np.array(tokens, dtype=np.int64)
+            # Pad or truncate to seq_len + 1
+            if len(data) < seq_len + 1:
+                data = np.pad(data, (0, seq_len + 1 - len(data)))
+            else:
+                data = data[: seq_len + 1]
+            all_x.append(data[:seq_len])
+            all_y.append(data[1: seq_len + 1])
+
+        return (
+            image_batch,
+            torch.tensor(np.stack(all_x)),
+            torch.tensor(np.stack(all_y)),
+            ids,
+        )
+
+    async def _mark_vision_trained(self, ids: list[int]):
+        from app.core.database import async_session
+        from app.models.data_submission import DataSubmission
+        from sqlalchemy import update
+
+        try:
+            async with async_session() as db:
+                await db.execute(
+                    update(DataSubmission)
+                    .where(DataSubmission.id.in_(ids))
+                    .values(trained=True)
+                )
+                await db.commit()
+            for sub_id in ids:
+                delete_image_from_s3(sub_id)
+        except Exception as e:
+            log.warning("Failed to mark vision data as trained: %s", e)
+
+    async def check_training_ready_queue(self):
+        from app.core.redis import TRAINING_READY_QUEUE, get_redis
+
+        try:
+            r = await get_redis()
+            count = 0
+            while True:
+                item = await r.rpop(TRAINING_READY_QUEUE)
+                if item is None:
+                    break
+                count += 1
+            if count > 0:
+                self._training_text = None
+                log.info("Training-ready queue: %d items, cache invalidated", count)
+        except Exception as e:
+            log.debug("Could not check training-ready queue: %s", e)
+
+    async def run_training_step(self, dispatch_fn) -> float:
+        await self.check_training_ready_queue()
+        self.model.train()
+        self.vision_encoder.train()
+
+        # 30% chance of vision batch when vision data is available
+        use_vision = random.random() < 0.3
+        if use_vision:
+            vision_data = await self.get_vision_batch()
+        else:
+            vision_data = None
+
+        if vision_data is not None:
+            image_batch, x, y, sub_ids = vision_data
+            image_embeds = self.vision_encoder(image_batch)
+            logits = self.model(x, image_embeds=image_embeds)
+            B, T, V = logits.shape
+            loss = self.loss_fn(logits.view(B * T, V), y.view(B * T))
+            log.info("Vision training step %d, batch_size=%d", self.step, B)
+        else:
+            x, y = self.get_batch()
+            logits = self.model(x)
+            B, T, V = logits.shape
+            loss = self.loss_fn(logits.view(B * T, V), y.view(B * T))
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -204,6 +328,9 @@ class TrainingOrchestrator:
 
         if self.step % 50 == 0:
             self.save_checkpoint()
+
+        if vision_data is not None:
+            await self._mark_vision_trained(sub_ids)
 
         return self.current_loss
 

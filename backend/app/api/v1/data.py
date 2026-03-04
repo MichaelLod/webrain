@@ -1,18 +1,17 @@
-import asyncio
-import hashlib
+import logging
 
-import httpx
-from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.redis import enqueue_ingest
 from app.core.security import get_current_user_id
 from app.models.data_submission import ContentType, DataSubmission, SubmissionStatus
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 class SubmitURLRequest(BaseModel):
@@ -26,6 +25,7 @@ class SubmissionResponse(BaseModel):
     content_type: str
     status: str
     title: str | None
+    image_s3_key: str | None = None
     trained: bool
     created_at: str
 
@@ -58,8 +58,9 @@ async def submit_url(
     await db.commit()
     await db.refresh(submission)
 
-    # Fetch content in background
-    asyncio.create_task(_fetch_content(submission.id))
+    queued = await enqueue_ingest(submission.id)
+    if not queued:
+        log.warning("Redis unavailable — submission %d stays PENDING for recovery", submission.id)
 
     return SubmissionResponse(
         id=submission.id,
@@ -67,6 +68,7 @@ async def submit_url(
         content_type=submission.content_type.value,
         status=submission.status.value,
         title=submission.title,
+        image_s3_key=submission.image_s3_key,
         trained=submission.trained,
         created_at=submission.created_at.isoformat(),
     )
@@ -95,6 +97,7 @@ async def list_submissions(
                 content_type=s.content_type.value,
                 status=s.status.value,
                 title=s.title,
+                image_s3_key=s.image_s3_key,
                 trained=s.trained,
                 created_at=s.created_at.isoformat(),
             )
@@ -125,80 +128,3 @@ async def data_stats(db: AsyncSession = Depends(get_db)):
         total_text_chars=chars_q.scalar() or 0,
         contributors=contributors_q.scalar() or 0,
     )
-
-
-async def _fetch_content(submission_id: int):
-    """Background task to fetch and extract text from a URL."""
-    from app.core.database import async_session
-
-    async with async_session() as db:
-        result = await db.execute(
-            select(DataSubmission).where(DataSubmission.id == submission_id)
-        )
-        submission = result.scalar_one_or_none()
-        if not submission:
-            return
-
-        submission.status = SubmissionStatus.FETCHING
-        await db.commit()
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                resp = await client.get(submission.url, headers={
-                    "User-Agent": "WeBrain/1.0 (Training Data Collector)"
-                })
-                resp.raise_for_status()
-
-            content_type = resp.headers.get("content-type", "")
-
-            if "text/html" in content_type or "text/plain" in content_type:
-                if "text/html" in content_type:
-                    soup = BeautifulSoup(resp.text, "html.parser")
-                    # Remove scripts, styles, nav
-                    for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
-                        tag.decompose()
-                    text = soup.get_text(separator="\n", strip=True)
-                    title = soup.title.string if soup.title else None
-                else:
-                    text = resp.text
-                    title = submission.url.split("/")[-1]
-
-                # Clean up whitespace
-                lines = [line.strip() for line in text.splitlines() if line.strip()]
-                text = "\n".join(lines)
-
-                if len(text) < 50:
-                    submission.status = SubmissionStatus.FAILED
-                    submission.error_message = "Not enough text content found"
-                else:
-                    content_hash = hashlib.sha256(text.encode()).hexdigest()
-                    dupe = await db.execute(
-                        select(DataSubmission.id)
-                        .where(DataSubmission.content_hash == content_hash)
-                        .where(DataSubmission.id != submission.id)
-                        .limit(1)
-                    )
-                    if dupe.scalar_one_or_none():
-                        submission.status = SubmissionStatus.FAILED
-                        submission.error_message = "Duplicate content already exists"
-                    else:
-                        submission.extracted_text = text[:500000]
-                        submission.content_hash = content_hash
-                        submission.title = (title or "")[:500]
-                        submission.status = SubmissionStatus.READY
-            else:
-                submission.title = submission.url.split("/")[-1]
-                submission.status = SubmissionStatus.READY
-                ref_text = f"[{submission.content_type.value}] {submission.url}"
-                submission.extracted_text = ref_text
-                submission.content_hash = hashlib.sha256(ref_text.encode()).hexdigest()
-
-        except Exception as e:
-            submission.status = SubmissionStatus.FAILED
-            submission.error_message = str(e)[:500]
-
-        await db.commit()
-
-        # Invalidate trainer cache so it picks up new data
-        from app.ml.trainer import trainer
-        trainer._training_text = None

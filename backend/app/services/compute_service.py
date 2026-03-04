@@ -121,11 +121,14 @@ class ComputeManager:
         blocks = list(model.blocks)
         layer_idx = random.randint(0, len(blocks) - 1) if blocks else 0
 
-        # Collect all 2D weight matrices >= TILE_SIZE from the model
+        # Collect all 2D weight matrices >= TILE_SIZE from model + vision encoder
         weight_choices = []
         for name, param in model.named_parameters():
             if param.dim() == 2 and param.shape[0] >= TILE_SIZE and param.shape[1] >= TILE_SIZE:
                 weight_choices.append((name, param.detach().numpy()))
+        for name, param in trainer.vision_encoder.named_parameters():
+            if param.dim() == 2 and param.shape[0] >= TILE_SIZE and param.shape[1] >= TILE_SIZE:
+                weight_choices.append((f"vision.{name}", param.detach().numpy()))
 
         if not weight_choices:
             a_tile = np.random.randn(TILE_SIZE, TILE_SIZE).astype(np.float32) * 0.1

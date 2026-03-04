@@ -177,7 +177,14 @@ export default function DataPage() {
                   className="flex items-center justify-between rounded-md px-3 py-2.5 hover:bg-zinc-800/50 transition-colors"
                 >
                   <div className="min-w-0 flex-1 mr-4">
-                    <div className="text-sm text-zinc-300 truncate">
+                    <div className="flex items-center gap-1.5 text-sm text-zinc-300 truncate">
+                      {s.content_type === "image" && (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-amber-400">
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                          <circle cx="8.5" cy="8.5" r="1.5" />
+                          <path d="m21 15-5-5L5 21" />
+                        </svg>
+                      )}
                       {s.title || s.url}
                     </div>
                     {s.title && (

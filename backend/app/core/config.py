@@ -19,3 +19,7 @@ S3_ACCESS_KEY_ID = os.getenv("S3_ACCESS_KEY_ID", "")
 S3_SECRET_ACCESS_KEY = os.getenv("S3_SECRET_ACCESS_KEY", "")
 S3_ENDPOINT = os.getenv("S3_ENDPOINT", "https://t3.storageapi.dev")
 S3_REGION = os.getenv("S3_REGION", "auto")
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+CHAT_IMAGE_COST = 20

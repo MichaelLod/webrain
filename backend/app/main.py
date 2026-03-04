@@ -1,18 +1,48 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
 from app.core.config import CORS_ORIGINS
-from app.core.database import Base, engine
+from app.core.database import Base, engine, async_session
+from app.core.redis import close_redis, enqueue_ingest
 from app.api.v1 import auth, tokens, compute, chat, leaderboard, data
+from app.models.data_submission import DataSubmission, SubmissionStatus
+
+log = logging.getLogger(__name__)
+
+
+async def _requeue_stuck_submissions():
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(DataSubmission.id).where(
+                    DataSubmission.status.in_([SubmissionStatus.PENDING, SubmissionStatus.FETCHING])
+                )
+            )
+            ids = [row[0] for row in result.all()]
+
+        if not ids:
+            return
+
+        count = 0
+        for sub_id in ids:
+            if await enqueue_ingest(sub_id):
+                count += 1
+        log.info("Requeued %d/%d stuck submissions", count, len(ids))
+    except Exception as e:
+        log.warning("Failed to requeue stuck submissions: %s", e)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await _requeue_stuck_submissions()
     yield
+    await close_redis()
     await engine.dispose()
 
 
