@@ -139,15 +139,25 @@ class TrainingOrchestrator:
     async def _load_db_texts() -> list[str]:
         from app.core.database import async_session
         from app.models.data_submission import DataSubmission, SubmissionStatus
-        from sqlalchemy import select
+        from sqlalchemy import select, update
 
         async with async_session() as db:
             result = await db.execute(
-                select(DataSubmission.extracted_text)
+                select(DataSubmission.id, DataSubmission.extracted_text)
                 .where(DataSubmission.status == SubmissionStatus.READY)
                 .where(DataSubmission.extracted_text.isnot(None))
             )
-            return [row[0] for row in result.all() if row[0] and len(row[0]) > 50]
+            rows = result.all()
+            texts = [row[1] for row in rows if row[1] and len(row[1]) > 50]
+            ids = [row[0] for row in rows if row[1] and len(row[1]) > 50]
+            if ids:
+                await db.execute(
+                    update(DataSubmission)
+                    .where(DataSubmission.id.in_(ids))
+                    .values(trained=True)
+                )
+                await db.commit()
+            return texts
 
     def get_batch(self, batch_size: int = 32, seq_len: int = 128) -> tuple[torch.Tensor, torch.Tensor]:
         text = self.load_training_data()

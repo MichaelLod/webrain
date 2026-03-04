@@ -187,6 +187,11 @@ export default function DataPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    {s.trained && (
+                      <span className="text-[10px] text-emerald-500" title="Used in training">
+                        trained
+                      </span>
+                    )}
                     <Badge
                       variant="secondary"
                       className={`text-[10px] ${statusColor[s.status] || ""}`}

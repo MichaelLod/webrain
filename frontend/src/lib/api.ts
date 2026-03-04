@@ -136,6 +136,7 @@ export interface DataSubmission {
   content_type: string;
   status: string;
   title: string | null;
+  trained: boolean;
   created_at: string;
 }
 

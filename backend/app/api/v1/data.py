@@ -26,6 +26,7 @@ class SubmissionResponse(BaseModel):
     content_type: str
     status: str
     title: str | None
+    trained: bool
     created_at: str
 
 
@@ -47,13 +48,6 @@ async def submit_url(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    # Reject duplicate URLs
-    existing = await db.execute(
-        select(DataSubmission.id).where(DataSubmission.url == str(body.url)).limit(1)
-    )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="This URL has already been submitted")
-
     submission = DataSubmission(
         user_id=user_id,
         url=str(body.url),
@@ -73,6 +67,7 @@ async def submit_url(
         content_type=submission.content_type.value,
         status=submission.status.value,
         title=submission.title,
+        trained=submission.trained,
         created_at=submission.created_at.isoformat(),
     )
 
@@ -100,6 +95,7 @@ async def list_submissions(
                 content_type=s.content_type.value,
                 status=s.status.value,
                 title=s.title,
+                trained=s.trained,
                 created_at=s.created_at.isoformat(),
             )
             for s in submissions
