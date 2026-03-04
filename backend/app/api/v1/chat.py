@@ -11,7 +11,7 @@ from app.core.security import get_current_user_id
 from app.models.chat import ChatMessage
 from app.models.token import TxType
 from app.services.token_service import debit_tokens
-from app.ml.inference import generate_text
+from app.ml.inference import generate_text_swarm
 
 router = APIRouter()
 
@@ -45,7 +45,7 @@ async def send_message(
 
     async def stream():
         full_response = ""
-        for token in generate_text(body.message):
+        async for token in generate_text_swarm(body.message):
             full_response += token
             yield f"data: {token}\n\n"
         yield "data: [DONE]\n\n"
@@ -92,7 +92,7 @@ async def send_message_with_image(
 
     async def stream():
         full_response = ""
-        for token in generate_text(message, image=image_tensor):
+        async for token in generate_text_swarm(message, image=image_tensor):
             full_response += token
             yield f"data: {token}\n\n"
         yield "data: [DONE]\n\n"

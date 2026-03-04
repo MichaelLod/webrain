@@ -109,6 +109,43 @@ export class GPUEngine {
     return result;
   }
 
+  /**
+   * Compute a full SwiGLU FFN layer:
+   *   output = down(silu(gate(x)) * up(x))
+   *
+   * Weights are pre-transposed by the server:
+   *   gateT: [D, D_ff], upT: [D, D_ff], downT: [D_ff, D]
+   *
+   * Input x: [M, D], Output: [M, D]
+   */
+  async computeFFN(
+    x: Float32Array,
+    gateT: Float32Array,
+    upT: Float32Array,
+    downT: Float32Array,
+    M: number,
+    D: number,
+    D_ff: number,
+  ): Promise<Float32Array> {
+    // Step 1 & 2: gate_out and up_out (can run sequentially, GPU is fast)
+    // gate_out = x[M,D] @ gateT[D,D_ff] = [M, D_ff]
+    const gateOut = await this.matmul(x, gateT, M, D, D_ff);
+    // up_out = x[M,D] @ upT[D,D_ff] = [M, D_ff]
+    const upOut = await this.matmul(x, upT, M, D, D_ff);
+
+    // Step 3: intermediate = silu(gate_out) * up_out (element-wise, in JS)
+    const intermediate = new Float32Array(M * D_ff);
+    for (let i = 0; i < M * D_ff; i++) {
+      const g = gateOut[i];
+      // silu(x) = x * sigmoid(x) = x / (1 + exp(-x))
+      const silu = g / (1 + Math.exp(-g));
+      intermediate[i] = silu * upOut[i];
+    }
+
+    // Step 4: output = intermediate[M,D_ff] @ downT[D_ff,D] = [M, D]
+    return this.matmul(intermediate, downT, M, D_ff, D);
+  }
+
   destroy() {
     this.device?.destroy();
     this.device = null;

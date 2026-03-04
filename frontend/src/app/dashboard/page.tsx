@@ -271,18 +271,26 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between py-2">
                 <span className="text-sm text-zinc-400">Architecture</span>
                 <span className="text-sm text-zinc-300">
-                  {modelInfo.n_layers}L / {modelInfo.n_heads}H / d{modelInfo.d_model}
+                  {modelInfo.n_layers}L / {modelInfo.n_heads}H / {modelInfo.n_kv_heads}KV / d{modelInfo.d_model}
                 </span>
               </div>
               <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-zinc-400">Feed-forward dim</span>
-                <span className="font-mono text-sm">{modelInfo.d_ff}</span>
-              </div>
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-zinc-400">Vocabulary</span>
+                <span className="text-sm text-zinc-400">Feed-forward</span>
                 <span className="text-sm text-zinc-300">
-                  {modelInfo.vocab_size} tokens (char-level)
+                  {modelInfo.ff_type} (d={modelInfo.d_ff})
                 </span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-zinc-400">Normalization</span>
+                <span className="text-sm text-zinc-300">{modelInfo.norm_type}</span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-zinc-400">Position encoding</span>
+                <span className="text-sm text-zinc-300">{modelInfo.pos_encoding}</span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-zinc-400">Tokenizer</span>
+                <span className="text-sm text-zinc-300">{modelInfo.tokenizer}</span>
               </div>
               <div className="flex items-center justify-between py-2">
                 <span className="text-sm text-zinc-400">Max context</span>

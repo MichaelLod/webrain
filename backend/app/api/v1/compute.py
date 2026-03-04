@@ -25,6 +25,8 @@ class TrainingStatusResponse(BaseModel):
     model_version: int
     connected_workers: int
     is_training: bool
+    collective_intelligence: float
+    active_experts: int
 
 
 class ModelInfoResponse(BaseModel):
@@ -35,11 +37,15 @@ class ModelInfoResponse(BaseModel):
     architecture: str
     n_layers: int
     n_heads: int
+    n_kv_heads: int
     d_model: int
     d_ff: int
     vocab_size: int
     max_seq_len: int
     tokenizer: str
+    norm_type: str
+    ff_type: str
+    pos_encoding: str
     training_steps: int
     current_loss: float
     training_data_chars: int
@@ -70,14 +76,17 @@ async def get_compute_stats(
 
 @router.get("/training-status", response_model=TrainingStatusResponse)
 async def get_training_status():
-    from app.ml.trainer import trainer
+    from app.ml.trainer import trainer, CONFIG_VERSION
+    swarm = manager.swarm
     return TrainingStatusResponse(
         current_step=trainer.step,
         current_loss=trainer.current_loss,
         total_flops=trainer.total_flops,
-        model_version=1,
+        model_version=CONFIG_VERSION,
         connected_workers=manager.worker_count,
         is_training=manager.is_training,
+        collective_intelligence=swarm.collective_intelligence if swarm else 0.25,
+        active_experts=swarm.active_experts if swarm else 1,
     )
 
 
@@ -90,7 +99,6 @@ async def get_model_info(db: AsyncSession = Depends(get_db)):
     vision_params = sum(p.numel() for p in trainer.vision_encoder.parameters())
     cfg = trainer.cfg
 
-    # Training data stats
     chars_q = await db.execute(
         select(
             func.coalesce(func.sum(func.length(DataSubmission.extracted_text)), 0),
@@ -102,7 +110,6 @@ async def get_model_info(db: AsyncSession = Depends(get_db)):
     data_chars = row[0] or 0
     data_sources = row[1] or 0
 
-    # Checkpoint size
     checkpoint_bytes = 0
     import os
     local_ckpt = os.path.join(os.path.dirname(__file__), "../../ml/checkpoints/latest.pt")
@@ -111,19 +118,25 @@ async def get_model_info(db: AsyncSession = Depends(get_db)):
 
     hf_url = f"https://huggingface.co/{HF_REPO_ID}" if HF_REPO_ID and HF_TOKEN else None
 
+    tokenizer_desc = f"BPE ({cfg.vocab_size} tokens)"
+
     return ModelInfoResponse(
-        name="TinyGPT",
+        name="WeBrainGPT",
         total_parameters=text_params + vision_params,
         text_parameters=text_params,
         vision_parameters=vision_params,
-        architecture=f"{cfg.n_layers}-layer Transformer + 2-layer Vision Encoder",
+        architecture=f"{cfg.n_layers}-layer Transformer (GQA + SwiGLU + RoPE) + 2-layer Vision Encoder",
         n_layers=cfg.n_layers,
         n_heads=cfg.n_heads,
+        n_kv_heads=cfg.n_kv_heads,
         d_model=cfg.d_model,
         d_ff=cfg.d_ff,
         vocab_size=cfg.vocab_size,
         max_seq_len=cfg.max_seq_len,
-        tokenizer="character-level (256 tokens)",
+        tokenizer=tokenizer_desc,
+        norm_type="RMSNorm",
+        ff_type="SwiGLU",
+        pos_encoding=f"RoPE (theta={cfg.rope_theta})",
         training_steps=trainer.step,
         current_loss=trainer.current_loss,
         training_data_chars=data_chars,

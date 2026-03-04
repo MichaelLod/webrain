@@ -19,6 +19,7 @@ dependencies = [
     "redis>=5.0.0",
     "python-multipart>=0.0.22",
     "sqlalchemy[asyncio]>=2.0.48",
+    "sentencepiece>=0.2.0",
     "torch>=2.10.0",
     "uvicorn[standard]>=0.41.0",
 ]

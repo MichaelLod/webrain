@@ -193,6 +193,39 @@ export default function ComputePage() {
               </Badge>
             )}
           </div>
+
+          {/* Collective Intelligence meter */}
+          <div className="mb-5 rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-medium uppercase tracking-wider text-zinc-400">
+                Collective Intelligence
+              </span>
+              <span className="text-sm font-bold tabular-nums text-amber-400">
+                {training
+                  ? `${Math.round((training.collective_intelligence ?? 0.25) * 100)}%`
+                  : "25%"}
+              </span>
+            </div>
+            <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-zinc-800">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-700"
+                style={{
+                  width: `${Math.round((training?.collective_intelligence ?? 0.25) * 100)}%`,
+                }}
+              />
+            </div>
+            <div className="mt-2 flex items-center justify-between text-[11px] text-zinc-500">
+              <span>
+                {training?.active_experts ?? 1} / 4 experts active
+              </span>
+              <span>
+                {(training?.connected_workers ?? 0) === 0
+                  ? "Server only"
+                  : `${training?.connected_workers} browser${(training?.connected_workers ?? 0) > 1 ? "s" : ""} contributing`}
+              </span>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div>
               <div className="text-lg font-bold tabular-nums">
@@ -244,19 +277,19 @@ export default function ComputePage() {
             {[
               {
                 icon: "01",
-                text: "Training gets broken into tiny 64x64 matrix tiles",
+                text: "Each FFN layer is split into 4 expert slices \u2014 the server always runs 1 locally (25% baseline)",
               },
               {
                 icon: "02",
-                text: "Your browser picks up a tile and runs it on your GPU",
+                text: "Your browser computes additional expert slices using WebGPU \u2014 more browsers = smarter model",
               },
               {
                 icon: "03",
-                text: "Results get assembled with everyone else\u2019s work",
+                text: "Expert outputs are summed \u2014 with all 4 active, the result is mathematically identical to the full model",
               },
               {
                 icon: "04",
-                text: "You earn tokens \u2014 fair exchange for your contribution",
+                text: "You earn tokens for every expert slice computed \u2014 fair exchange for collective intelligence",
               },
             ].map((step) => (
               <div key={step.icon} className="flex gap-3 text-sm">

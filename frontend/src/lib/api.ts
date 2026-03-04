@@ -195,6 +195,8 @@ export interface TrainingStatus {
   model_version: number;
   connected_workers: number;
   is_training: boolean;
+  collective_intelligence: number;
+  active_experts: number;
 }
 
 export interface ModelInfo {
@@ -205,11 +207,15 @@ export interface ModelInfo {
   architecture: string;
   n_layers: number;
   n_heads: number;
+  n_kv_heads: number;
   d_model: number;
   d_ff: number;
   vocab_size: number;
   max_seq_len: number;
   tokenizer: string;
+  norm_type: string;
+  ff_type: string;
+  pos_encoding: string;
   training_steps: number;
   current_loss: number;
   training_data_chars: number;

@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ComputeWebSocket, TaskMessage } from "@/lib/ws";
+import {
+  ComputeWebSocket,
+  TaskMessage,
+  FFNTaskMessage,
+  TileTaskMessage,
+  WeightsMessage,
+} from "@/lib/ws";
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -41,10 +47,21 @@ export function useComputeWorker() {
       }
 
       if (type === "result") {
-        const { taskId, cTile, computeTimeMs } = payload;
-        const cTileB64 = arrayBufferToBase64(cTile);
-        wsRef.current?.sendResult(taskId, cTileB64, computeTimeMs);
+        const { taskId, taskType, cTile, output, computeTimeMs } = payload;
+        if (taskType === "ffn_forward") {
+          const outputB64 = arrayBufferToBase64(output);
+          wsRef.current?.sendFFNResult(taskId, outputB64, computeTimeMs);
+        } else {
+          const cTileB64 = arrayBufferToBase64(cTile);
+          wsRef.current?.sendResult(taskId, cTileB64, computeTimeMs);
+        }
         setTasksCompleted((c) => c + 1);
+      }
+
+      if (type === "need_weights") {
+        // Worker needs weights it doesn't have cached — request from server
+        const { layerIdx, weightsVersion } = payload;
+        wsRef.current?.sendNeedWeights(layerIdx, weightsVersion);
       }
     },
     []
@@ -66,19 +83,62 @@ export function useComputeWorker() {
 
     const ws = new ComputeWebSocket();
     ws.onStatusChange = setConnected;
+
     ws.onTask = (task: TaskMessage) => {
-      const aTile = base64ToArrayBuffer(task.a_tile);
-      const bTile = base64ToArrayBuffer(task.b_tile);
+      if (task.task_type === "ffn_forward") {
+        const ffnTask = task as FFNTaskMessage;
+        const activations = base64ToArrayBuffer(ffnTask.activations);
+        const weights = ffnTask.weights
+          ? {
+              gate: base64ToArrayBuffer(ffnTask.weights.gate),
+              up: base64ToArrayBuffer(ffnTask.weights.up),
+              down: base64ToArrayBuffer(ffnTask.weights.down),
+            }
+          : undefined;
+
+        workerRef.current?.postMessage({
+          type: "ffn_forward",
+          payload: {
+            taskId: ffnTask.task_id,
+            activations,
+            layerIdx: ffnTask.layer_idx,
+            dModel: ffnTask.d_model,
+            dFf: ffnTask.d_ff,
+            seqLen: ffnTask.seq_len,
+            weightsVersion: ffnTask.weights_version,
+            weights,
+          },
+        });
+      } else {
+        const tileTask = task as TileTaskMessage;
+        const aTile = base64ToArrayBuffer(tileTask.a_tile);
+        const bTile = base64ToArrayBuffer(tileTask.b_tile);
+        workerRef.current?.postMessage({
+          type: "compute",
+          payload: {
+            taskId: tileTask.task_id,
+            aTile,
+            bTile,
+            tileSize: tileTask.tile_size,
+          },
+        });
+      }
+    };
+
+    ws.onWeights = (msg: WeightsMessage) => {
+      // Server sent weights in response to our request — cache in worker
       workerRef.current?.postMessage({
-        type: "compute",
+        type: "cache_weights",
         payload: {
-          taskId: task.task_id,
-          aTile,
-          bTile,
-          tileSize: task.tile_size,
+          layerIdx: msg.layer_idx,
+          weightsVersion: msg.weights_version,
+          gate: base64ToArrayBuffer(msg.gate),
+          up: base64ToArrayBuffer(msg.up),
+          down: base64ToArrayBuffer(msg.down),
         },
       });
     };
+
     ws.onCredited = (msg) => {
       setTokensEarned((t) => t + msg.tokens_earned);
     };

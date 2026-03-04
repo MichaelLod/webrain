@@ -27,3 +27,13 @@ HF_REPO_ID = os.getenv("HF_REPO_ID", "webrain/thepeoplesai")
 HF_TOKEN = os.getenv("HF_TOKEN", "")
 
 CHAT_IMAGE_COST = 20
+
+# Model architecture
+MODEL_VERSION = int(os.getenv("MODEL_VERSION", "2"))
+VOCAB_SIZE = int(os.getenv("VOCAB_SIZE", "8192"))
+D_MODEL = int(os.getenv("D_MODEL", "512"))
+N_LAYERS = int(os.getenv("N_LAYERS", "12"))
+N_HEADS = int(os.getenv("N_HEADS", "8"))
+N_KV_HEADS = int(os.getenv("N_KV_HEADS", "2"))
+D_FF = int(os.getenv("D_FF", "1376"))
+MAX_SEQ_LEN = int(os.getenv("MAX_SEQ_LEN", "2048"))
