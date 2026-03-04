@@ -26,9 +26,10 @@ class DataSubmission(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
-    url: Mapped[str] = mapped_column(String(2000), nullable=False)
+    url: Mapped[str] = mapped_column(String(2000), nullable=False, index=True)
     content_type: Mapped[ContentType] = mapped_column(Enum(ContentType), default=ContentType.TEXT)
     status: Mapped[SubmissionStatus] = mapped_column(Enum(SubmissionStatus), default=SubmissionStatus.PENDING)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)

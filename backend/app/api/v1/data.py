@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 
 import httpx
 from bs4 import BeautifulSoup
@@ -46,6 +47,13 @@ async def submit_url(
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
+    # Reject duplicate URLs
+    existing = await db.execute(
+        select(DataSubmission.id).where(DataSubmission.url == str(body.url)).limit(1)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="This URL has already been submitted")
+
     submission = DataSubmission(
         user_id=user_id,
         url=str(body.url),
@@ -167,14 +175,27 @@ async def _fetch_content(submission_id: int):
                     submission.status = SubmissionStatus.FAILED
                     submission.error_message = "Not enough text content found"
                 else:
-                    submission.extracted_text = text[:500000]  # Cap at 500K chars
-                    submission.title = (title or "")[:500]
-                    submission.status = SubmissionStatus.READY
+                    content_hash = hashlib.sha256(text.encode()).hexdigest()
+                    dupe = await db.execute(
+                        select(DataSubmission.id)
+                        .where(DataSubmission.content_hash == content_hash)
+                        .where(DataSubmission.id != submission.id)
+                        .limit(1)
+                    )
+                    if dupe.scalar_one_or_none():
+                        submission.status = SubmissionStatus.FAILED
+                        submission.error_message = "Duplicate content already exists"
+                    else:
+                        submission.extracted_text = text[:500000]
+                        submission.content_hash = content_hash
+                        submission.title = (title or "")[:500]
+                        submission.status = SubmissionStatus.READY
             else:
-                # For non-text content, just store the URL as reference
                 submission.title = submission.url.split("/")[-1]
                 submission.status = SubmissionStatus.READY
-                submission.extracted_text = f"[{submission.content_type.value}] {submission.url}"
+                ref_text = f"[{submission.content_type.value}] {submission.url}"
+                submission.extracted_text = ref_text
+                submission.content_hash = hashlib.sha256(ref_text.encode()).hexdigest()
 
         except Exception as e:
             submission.status = SubmissionStatus.FAILED
