@@ -228,9 +228,24 @@ export default function DashboardPage() {
           <CardHeader className="pb-4">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">Model Details</CardTitle>
-              <span className="rounded-full border border-amber-800/50 bg-amber-950/40 px-2.5 py-0.5 text-[11px] font-medium text-amber-400">
-                {modelInfo.name}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full border border-amber-800/50 bg-amber-950/40 px-2.5 py-0.5 text-[11px] font-medium text-amber-400">
+                  {modelInfo.name}
+                </span>
+                {modelInfo.huggingface_url && (
+                  <a
+                    href={modelInfo.huggingface_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-700 px-2.5 py-0.5 text-[11px] font-medium text-zinc-300 transition-colors hover:border-amber-800/50 hover:text-amber-400"
+                  >
+                    Download
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent>

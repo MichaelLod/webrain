@@ -215,4 +215,5 @@ export interface ModelInfo {
   training_data_chars: number;
   training_data_sources: number;
   checkpoint_size_bytes: number;
+  huggingface_url: string | null;
 }

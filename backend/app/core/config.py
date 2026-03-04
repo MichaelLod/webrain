@@ -22,4 +22,8 @@ S3_REGION = os.getenv("S3_REGION", "auto")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
+# Hugging Face Hub
+HF_REPO_ID = os.getenv("HF_REPO_ID", "webrain/thepeoplesai")
+HF_TOKEN = os.getenv("HF_TOKEN", "")
+
 CHAT_IMAGE_COST = 20

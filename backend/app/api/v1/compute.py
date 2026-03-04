@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import HF_REPO_ID, HF_TOKEN
 from app.core.database import get_db
 from app.core.security import decode_token, get_current_user_id
 from app.models.compute import ComputeResult
@@ -44,6 +45,7 @@ class ModelInfoResponse(BaseModel):
     training_data_chars: int
     training_data_sources: int
     checkpoint_size_bytes: int
+    huggingface_url: str | None = None
 
 
 @router.get("/stats", response_model=StatsResponse)
@@ -107,6 +109,8 @@ async def get_model_info(db: AsyncSession = Depends(get_db)):
     if os.path.exists(local_ckpt):
         checkpoint_bytes = os.path.getsize(local_ckpt)
 
+    hf_url = f"https://huggingface.co/{HF_REPO_ID}" if HF_REPO_ID and HF_TOKEN else None
+
     return ModelInfoResponse(
         name="TinyGPT",
         total_parameters=text_params + vision_params,
@@ -125,6 +129,7 @@ async def get_model_info(db: AsyncSession = Depends(get_db)):
         training_data_chars=data_chars,
         training_data_sources=data_sources,
         checkpoint_size_bytes=checkpoint_bytes,
+        huggingface_url=hf_url,
     )
 
 

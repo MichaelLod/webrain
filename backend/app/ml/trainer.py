@@ -1,8 +1,12 @@
 import asyncio
 import io
+import json
 import logging
 import os
 import random
+import tempfile
+import threading
+import time
 
 import numpy as np
 import torch
@@ -19,6 +23,8 @@ from app.core.config import (
     S3_SECRET_ACCESS_KEY,
     S3_ENDPOINT,
     S3_REGION,
+    HF_REPO_ID,
+    HF_TOKEN,
 )
 
 CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
@@ -26,6 +32,7 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 S3_CHECKPOINT_KEY = "checkpoints/latest.pt"
 
 log = logging.getLogger(__name__)
+_HF_PUSH_INTERVAL = 7 * 24 * 60 * 60  # 1 week in seconds
 
 
 def _get_s3_client():
@@ -55,6 +62,7 @@ class TrainingOrchestrator:
         self.total_flops = 0.0
         self.is_training = False
         self._training_text: str | None = None
+        self._last_hf_push: float = 0.0
         self._load_checkpoint()
 
     def _load_checkpoint(self):
@@ -115,6 +123,111 @@ class TrainingOrchestrator:
         os.makedirs(CHECKPOINT_DIR, exist_ok=True)
         path = os.path.join(CHECKPOINT_DIR, "latest.pt")
         torch.save(state, path)
+
+        # Push to Hugging Face Hub weekly in background thread
+        now = time.monotonic()
+        if now - self._last_hf_push >= _HF_PUSH_INTERVAL:
+            self._last_hf_push = now
+            threading.Thread(
+                target=self._push_to_hub,
+                daemon=True,
+            ).start()
+
+    def _push_to_hub(self):
+        if not HF_REPO_ID or not HF_TOKEN:
+            return
+        try:
+            from huggingface_hub import HfApi
+
+            with tempfile.TemporaryDirectory() as tmp:
+                # Save model weights
+                torch.save(self.model.state_dict(), os.path.join(tmp, "model.pt"))
+                torch.save(self.vision_encoder.state_dict(), os.path.join(tmp, "vision_encoder.pt"))
+
+                # Config
+                cfg = self.cfg
+                config = {
+                    "model_type": "TinyGPT",
+                    "vocab_size": cfg.vocab_size,
+                    "n_layers": cfg.n_layers,
+                    "n_heads": cfg.n_heads,
+                    "d_model": cfg.d_model,
+                    "d_ff": cfg.d_ff,
+                    "max_seq_len": cfg.max_seq_len,
+                    "dropout": cfg.dropout,
+                    "training_step": self.step,
+                    "current_loss": self.current_loss,
+                }
+                with open(os.path.join(tmp, "config.json"), "w") as f:
+                    json.dump(config, f, indent=2)
+
+                # Model card
+                text_params = sum(p.numel() for p in self.model.parameters())
+                vision_params = sum(p.numel() for p in self.vision_encoder.parameters())
+                card = f"""---
+license: apache-2.0
+tags:
+  - community-trained
+  - distributed-compute
+  - webrain
+---
+
+# The People's AI
+
+A collectively-trained language model built by the WeBrain community. Every parameter in this model was shaped by real people donating their compute power through their web browsers.
+
+## Architecture
+
+| Component | Value |
+|-----------|-------|
+| Type | {cfg.n_layers}-layer Transformer + 2-layer Vision Encoder |
+| Text parameters | {text_params:,} |
+| Vision parameters | {vision_params:,} |
+| Hidden dim | {cfg.d_model} |
+| Attention heads | {cfg.n_heads} |
+| Feed-forward dim | {cfg.d_ff} |
+| Vocabulary | {cfg.vocab_size} tokens (character-level) |
+| Max context | {cfg.max_seq_len} |
+
+## Training
+
+- **Step**: {self.step:,}
+- **Loss**: {self.current_loss:.4f}
+- **Method**: Distributed browser-based compute via tile decomposition
+- **Optimizer**: Adam (lr=3e-4)
+
+## How it works
+
+WeBrain decomposes matrix multiplications into small tiles that volunteers compute in their browsers. Results are assembled server-side to drive training forward. This model is the living output of that collective effort.
+
+## Usage
+
+```python
+import torch
+from model import TinyGPT, TinyGPTConfig
+
+cfg = TinyGPTConfig()
+model = TinyGPT(cfg)
+model.load_state_dict(torch.load("model.pt", map_location="cpu"))
+```
+
+## Community
+
+Join us at [webrain.dev](https://webrain.dev) to contribute your compute and help train the next version.
+"""
+                with open(os.path.join(tmp, "README.md"), "w") as f:
+                    f.write(card)
+
+                api = HfApi(token=HF_TOKEN)
+                api.upload_folder(
+                    folder_path=tmp,
+                    repo_id=HF_REPO_ID,
+                    repo_type="model",
+                    commit_message=f"Update checkpoint at step {self.step}",
+                )
+            log.info("Pushed checkpoint to HF Hub (%s) at step %d", HF_REPO_ID, self.step)
+        except Exception as e:
+            log.warning("Failed to push to HF Hub: %s", e)
 
     def load_training_data(self) -> str:
         if self._training_text:
