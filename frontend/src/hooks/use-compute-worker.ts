@@ -45,7 +45,6 @@ export function useComputeWorker() {
         const cTileB64 = arrayBufferToBase64(cTile);
         wsRef.current?.sendResult(taskId, cTileB64, computeTimeMs);
         setTasksCompleted((c) => c + 1);
-        wsRef.current?.sendReady();
       }
     },
     []

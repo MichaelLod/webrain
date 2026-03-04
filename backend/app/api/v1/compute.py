@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import decode_token, get_current_user_id
 from app.models.compute import ComputeResult
-from app.models.training import TrainingState
 from app.services.compute_service import manager
 
 router = APIRouter()
@@ -48,14 +47,13 @@ async def get_compute_stats(
 
 
 @router.get("/training-status", response_model=TrainingStatusResponse)
-async def get_training_status(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(TrainingState).limit(1))
-    state = result.scalar_one_or_none()
+async def get_training_status():
+    from app.ml.trainer import trainer
     return TrainingStatusResponse(
-        current_step=state.current_step if state else 0,
-        current_loss=state.current_loss if state else 0.0,
-        total_flops=state.total_flops if state else 0.0,
-        model_version=state.model_version if state else 1,
+        current_step=trainer.step,
+        current_loss=trainer.current_loss,
+        total_flops=trainer.total_flops,
+        model_version=1,
         connected_workers=manager.worker_count,
         is_training=manager.is_training,
     )

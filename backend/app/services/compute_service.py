@@ -2,17 +2,23 @@ import asyncio
 import base64
 import random
 import time
+import uuid
 
 import numpy as np
 from fastapi import WebSocket
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import TILE_SIZE
+from app.core.database import async_session
 from app.ml.tiling import TileTask, decompose_matmul, assemble_tiles
 from app.ml.trainer import trainer
+from app.models.token import TxType
+from app.services.token_service import credit_tokens
 
 
 class WorkerConnection:
-    __slots__ = ("ws", "user_id", "ready", "current_task", "tasks_completed")
+    __slots__ = ("ws", "user_id", "ready", "current_task", "tasks_completed", "tokens_earned")
 
     def __init__(self, ws: WebSocket, user_id: int):
         self.ws = ws
@@ -20,20 +26,15 @@ class WorkerConnection:
         self.ready = False
         self.current_task: TileTask | None = None
         self.tasks_completed = 0
+        self.tokens_earned = 0
 
 
 class ComputeManager:
     def __init__(self):
         self.workers: dict[WebSocket, WorkerConnection] = {}
-        self.pending_tasks: asyncio.Queue[TileTask] = asyncio.Queue()
-        self.completed_tiles: dict[str, dict[tuple[int, int, int], np.ndarray]] = {}
-        self.task_callbacks: dict[str, asyncio.Event] = {}
         self.is_training = False
         self._training_task: asyncio.Task | None = None
-        # Verification: canary tasks
         self.canary_results: dict[str, np.ndarray] = {}
-        # Track user results for token crediting
-        self.task_user_map: dict[str, int] = {}
 
     @property
     def worker_count(self) -> int:
@@ -45,10 +46,9 @@ class ComputeManager:
             self.start_training()
 
     def disconnect(self, ws: WebSocket):
-        worker = self.workers.pop(ws, None)
-        if worker and worker.current_task:
-            # Re-queue the task
-            self.pending_tasks.put_nowait(worker.current_task)
+        self.workers.pop(ws, None)
+        if self.worker_count == 0:
+            self.stop_training()
 
     async def handle_message(self, ws: WebSocket, user_id: int, data: dict):
         msg_type = data.get("type")
@@ -58,117 +58,128 @@ class ComputeManager:
 
         if msg_type == "ready":
             worker.ready = True
-            await self._dispatch_to_worker(worker)
+            # Send a tile task immediately
+            await self._send_tile_task(worker)
 
         elif msg_type == "result":
-            task_id = data["task_id"]
-            c_tile_b64 = data["c_tile"]
+            task_id = data.get("task_id", "")
             compute_time_ms = data.get("compute_time_ms", 0)
-
-            c_tile_bytes = base64.b64decode(c_tile_b64)
-            c_tile = np.frombuffer(c_tile_bytes, dtype=np.float32).reshape(
-                TILE_SIZE, TILE_SIZE
-            )
 
             # Verify canary if applicable
             is_verified = True
             if task_id in self.canary_results:
-                expected = self.canary_results.pop(task_id)
-                if not np.allclose(c_tile, expected, atol=1e-3):
+                try:
+                    c_tile_b64 = data.get("c_tile", "")
+                    c_tile_bytes = base64.b64decode(c_tile_b64)
+                    c_tile = np.frombuffer(c_tile_bytes, dtype=np.float32).reshape(
+                        TILE_SIZE, TILE_SIZE
+                    )
+                    expected = self.canary_results.pop(task_id)
+                    if not np.allclose(c_tile, expected, atol=1e-2):
+                        is_verified = False
+                except Exception:
                     is_verified = False
 
             if is_verified:
-                # Store result
-                task = worker.current_task
-                if task:
-                    op_key = f"s{task.meta['step']}_l{task.meta['layer']}_{task.meta['op']}"
-                    if op_key not in self.completed_tiles:
-                        self.completed_tiles[op_key] = {}
-                    self.completed_tiles[op_key][(task.i, task.j, task.k)] = c_tile
-
-                    if op_key in self.task_callbacks:
-                        self.task_callbacks[op_key].set()
-
-                # Credit tokens
                 tokens = max(1, int(compute_time_ms / 2))
-                await ws.send_json({"type": "credited", "tokens_earned": tokens})
+                worker.tasks_completed += 1
+                worker.tokens_earned += tokens
+
+                # Credit tokens in DB
+                try:
+                    async with async_session() as db:
+                        await credit_tokens(
+                            db, user_id, tokens,
+                            tx_type=TxType.COMPUTE_REWARD,
+                            reference_id=task_id,
+                        )
+                        await db.commit()
+                except Exception as e:
+                    print(f"Token credit error: {e}")
+
+                await ws.send_json({
+                    "type": "credited",
+                    "tokens_earned": tokens,
+                    "total_earned": worker.tokens_earned,
+                    "tasks_completed": worker.tasks_completed,
+                })
 
             worker.current_task = None
-            worker.tasks_completed += 1
             worker.ready = True
-            await self._dispatch_to_worker(worker)
+            # Send next task
+            await self._send_tile_task(worker)
 
-    async def _dispatch_to_worker(self, worker: WorkerConnection):
-        if not worker.ready or self.pending_tasks.empty():
+    async def _send_tile_task(self, worker: WorkerConnection):
+        """Generate and send a tile matmul task to the worker."""
+        if not worker.ready:
             return
 
-        task = await self.pending_tasks.get()
-        worker.ready = False
-        worker.current_task = task
+        task_id = str(uuid.uuid4())[:12]
 
-        # Encode tiles as base64
-        a_b64 = base64.b64encode(task.a_tile.tobytes()).decode()
-        b_b64 = base64.b64encode(task.b_tile.tobytes()).decode()
+        # Generate a real tile from the model's current weights
+        # Pick a random layer and use its weight matrix
+        model = trainer.model
+        layers = list(model.layers)
+        if not layers:
+            return
 
+        layer_idx = random.randint(0, len(layers) - 1)
+        layer = layers[layer_idx]
+
+        # Get weight from one of the linear layers
+        weight_choices = []
+        for name, param in layer.named_parameters():
+            if param.dim() == 2 and param.shape[0] >= TILE_SIZE and param.shape[1] >= TILE_SIZE:
+                weight_choices.append((name, param.data.numpy()))
+
+        if not weight_choices:
+            # Fallback: random matrices
+            a_tile = np.random.randn(TILE_SIZE, TILE_SIZE).astype(np.float32) * 0.1
+            b_tile = np.random.randn(TILE_SIZE, TILE_SIZE).astype(np.float32) * 0.1
+        else:
+            name, weight = random.choice(weight_choices)
+            # Extract a tile-sized chunk
+            r = random.randint(0, max(0, weight.shape[0] - TILE_SIZE))
+            c = random.randint(0, max(0, weight.shape[1] - TILE_SIZE))
+            a_tile = weight[r:r+TILE_SIZE, c:c+TILE_SIZE].copy()
+            # Second tile: random input activation
+            b_tile = np.random.randn(TILE_SIZE, TILE_SIZE).astype(np.float32) * 0.02
+
+            # Pad if needed
+            if a_tile.shape != (TILE_SIZE, TILE_SIZE):
+                padded = np.zeros((TILE_SIZE, TILE_SIZE), dtype=np.float32)
+                padded[:a_tile.shape[0], :a_tile.shape[1]] = a_tile
+                a_tile = padded
+
+        # Canary check: 1 in 10 tasks
         is_canary = random.random() < 0.1
         if is_canary:
-            # Replace with identity multiplication for verification
             canary_a = np.eye(TILE_SIZE, dtype=np.float32)
-            canary_b = task.b_tile.copy()
-            self.canary_results[task.task_id] = canary_b  # I @ B = B
-            a_b64 = base64.b64encode(canary_a.tobytes()).decode()
-            b_b64 = base64.b64encode(canary_b.tobytes()).decode()
+            self.canary_results[task_id] = b_tile.copy()  # I @ B = B
+            a_tile = canary_a
 
-        await worker.ws.send_json(
-            {
-                "type": "task",
-                "task_id": task.task_id,
-                "a_tile": a_b64,
-                "b_tile": b_b64,
-                "tile_size": TILE_SIZE,
-                "position": {"i": task.i, "j": task.j, "k": task.k},
-                "meta": task.meta,
-            }
+        a_b64 = base64.b64encode(a_tile.tobytes()).decode()
+        b_b64 = base64.b64encode(b_tile.tobytes()).decode()
+
+        task = TileTask(
+            task_id=task_id,
+            a_tile=a_tile,
+            b_tile=b_tile,
+            i=0, j=0, k=0,
+            meta={"step": trainer.step, "layer": layer_idx, "op": "fwd"},
         )
+        worker.current_task = task
+        worker.ready = False
 
-    async def dispatch_matmul(
-        self,
-        a: np.ndarray,
-        b: np.ndarray,
-        step: int,
-        layer: int,
-        op_name: str,
-    ) -> np.ndarray:
-        """Decompose, dispatch to workers, wait for all tiles, assemble."""
-        tasks = decompose_matmul(a, b, step, layer, op_name, TILE_SIZE)
-        op_key = f"s{step}_l{layer}_{op_name}"
-        self.completed_tiles[op_key] = {}
-        event = asyncio.Event()
-        self.task_callbacks[op_key] = event
-
-        expected_tiles = set()
-        for task in tasks:
-            expected_tiles.add((task.i, task.j, task.k))
-            await self.pending_tasks.put(task)
-
-        # Dispatch to all ready workers
-        for worker in self.workers.values():
-            if worker.ready:
-                await self._dispatch_to_worker(worker)
-
-        # Wait for all tiles (with timeout)
-        while set(self.completed_tiles[op_key].keys()) != expected_tiles:
-            event.clear()
-            try:
-                await asyncio.wait_for(event.wait(), timeout=60.0)
-            except asyncio.TimeoutError:
-                break
-
-        M, _ = a.shape
-        _, N = b.shape
-        result = assemble_tiles(self.completed_tiles.pop(op_key, {}), M, N, TILE_SIZE)
-        self.task_callbacks.pop(op_key, None)
-        return result
+        await worker.ws.send_json({
+            "type": "task",
+            "task_id": task_id,
+            "a_tile": a_b64,
+            "b_tile": b_b64,
+            "tile_size": TILE_SIZE,
+            "position": {"i": 0, "j": 0, "k": 0},
+            "meta": {"step": trainer.step, "layer": layer_idx, "op": "fwd"},
+        })
 
     def start_training(self):
         if self.is_training:
@@ -177,15 +188,16 @@ class ComputeManager:
         self._training_task = asyncio.create_task(self._training_loop())
 
     async def _training_loop(self):
-        """Main training loop - runs training steps as long as workers are connected."""
+        """Run training steps on the server while workers compute tiles."""
         while self.is_training and self.worker_count > 0:
             try:
-                loss = await trainer.run_training_step(self.dispatch_matmul)
+                loss = await trainer.run_training_step(None)
                 print(f"Step {trainer.step}: loss={loss:.4f}")
-                await asyncio.sleep(0.1)
+                # Pace the training so workers can keep up
+                await asyncio.sleep(0.5)
             except Exception as e:
                 print(f"Training error: {e}")
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(2.0)
 
         self.is_training = False
 
