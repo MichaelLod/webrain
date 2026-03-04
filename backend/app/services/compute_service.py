@@ -117,35 +117,26 @@ class ComputeManager:
         task_id = str(uuid.uuid4())[:12]
 
         # Generate a real tile from the model's current weights
-        # Pick a random layer and use its weight matrix
         model = trainer.model
-        layers = list(model.layers)
-        if not layers:
-            return
+        blocks = list(model.blocks)
+        layer_idx = random.randint(0, len(blocks) - 1) if blocks else 0
 
-        layer_idx = random.randint(0, len(layers) - 1)
-        layer = layers[layer_idx]
-
-        # Get weight from one of the linear layers
+        # Collect all 2D weight matrices >= TILE_SIZE from the model
         weight_choices = []
-        for name, param in layer.named_parameters():
+        for name, param in model.named_parameters():
             if param.dim() == 2 and param.shape[0] >= TILE_SIZE and param.shape[1] >= TILE_SIZE:
-                weight_choices.append((name, param.data.numpy()))
+                weight_choices.append((name, param.detach().numpy()))
 
         if not weight_choices:
-            # Fallback: random matrices
             a_tile = np.random.randn(TILE_SIZE, TILE_SIZE).astype(np.float32) * 0.1
             b_tile = np.random.randn(TILE_SIZE, TILE_SIZE).astype(np.float32) * 0.1
         else:
             name, weight = random.choice(weight_choices)
-            # Extract a tile-sized chunk
             r = random.randint(0, max(0, weight.shape[0] - TILE_SIZE))
             c = random.randint(0, max(0, weight.shape[1] - TILE_SIZE))
             a_tile = weight[r:r+TILE_SIZE, c:c+TILE_SIZE].copy()
-            # Second tile: random input activation
             b_tile = np.random.randn(TILE_SIZE, TILE_SIZE).astype(np.float32) * 0.02
 
-            # Pad if needed
             if a_tile.shape != (TILE_SIZE, TILE_SIZE):
                 padded = np.zeros((TILE_SIZE, TILE_SIZE), dtype=np.float32)
                 padded[:a_tile.shape[0], :a_tile.shape[1]] = a_tile

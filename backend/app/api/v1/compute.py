@@ -74,4 +74,8 @@ async def compute_websocket(websocket: WebSocket, token: str):
             data = await websocket.receive_json()
             await manager.handle_message(websocket, user_id, data)
     except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"WebSocket error for user {user_id}: {e}")
+    finally:
         manager.disconnect(websocket)
