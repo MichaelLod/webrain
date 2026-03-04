@@ -1,4 +1,6 @@
 import asyncio
+import io
+import logging
 import os
 import time
 
@@ -9,10 +11,33 @@ import torch.nn as nn
 from app.ml.model import TinyGPT, TinyGPTConfig
 from app.ml.tokenizer import CharTokenizer
 from app.ml.tiling import TileTask, assemble_tiles, decompose_matmul
-from app.core.config import TILE_SIZE
+from app.core.config import (
+    TILE_SIZE,
+    S3_BUCKET,
+    S3_ACCESS_KEY_ID,
+    S3_SECRET_ACCESS_KEY,
+    S3_ENDPOINT,
+    S3_REGION,
+)
 
 CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+S3_CHECKPOINT_KEY = "checkpoints/latest.pt"
+
+log = logging.getLogger(__name__)
+
+
+def _get_s3_client():
+    if not S3_BUCKET or not S3_ACCESS_KEY_ID:
+        return None
+    import boto3
+    return boto3.client(
+        "s3",
+        endpoint_url=S3_ENDPOINT,
+        aws_access_key_id=S3_ACCESS_KEY_ID,
+        aws_secret_access_key=S3_SECRET_ACCESS_KEY,
+        region_name=S3_REGION,
+    )
 
 
 class TrainingOrchestrator:
@@ -30,6 +55,24 @@ class TrainingOrchestrator:
         self._load_checkpoint()
 
     def _load_checkpoint(self):
+        # Try S3 first
+        s3 = _get_s3_client()
+        if s3:
+            try:
+                buf = io.BytesIO()
+                s3.download_fileobj(S3_BUCKET, S3_CHECKPOINT_KEY, buf)
+                buf.seek(0)
+                state = torch.load(buf, map_location="cpu", weights_only=True)
+                self.model.load_state_dict(state["model"])
+                self.optimizer.load_state_dict(state["optimizer"])
+                self.step = state.get("step", 0)
+                self.current_loss = state.get("loss", 0.0)
+                log.info("Loaded checkpoint from S3 at step %d", self.step)
+                return
+            except Exception as e:
+                log.info("No S3 checkpoint found (%s), checking local", e)
+
+        # Fallback to local
         os.makedirs(CHECKPOINT_DIR, exist_ok=True)
         path = os.path.join(CHECKPOINT_DIR, "latest.pt")
         if os.path.exists(path):
@@ -38,31 +81,42 @@ class TrainingOrchestrator:
             self.optimizer.load_state_dict(state["optimizer"])
             self.step = state.get("step", 0)
             self.current_loss = state.get("loss", 0.0)
+            log.info("Loaded local checkpoint at step %d", self.step)
 
     def save_checkpoint(self):
+        state = {
+            "model": self.model.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "step": self.step,
+            "loss": self.current_loss,
+        }
+
+        # Save to S3
+        s3 = _get_s3_client()
+        if s3:
+            try:
+                buf = io.BytesIO()
+                torch.save(state, buf)
+                buf.seek(0)
+                s3.upload_fileobj(buf, S3_BUCKET, S3_CHECKPOINT_KEY)
+                log.info("Saved checkpoint to S3 at step %d", self.step)
+            except Exception as e:
+                log.error("Failed to save checkpoint to S3: %s", e)
+
+        # Always save locally too
         os.makedirs(CHECKPOINT_DIR, exist_ok=True)
         path = os.path.join(CHECKPOINT_DIR, "latest.pt")
-        torch.save(
-            {
-                "model": self.model.state_dict(),
-                "optimizer": self.optimizer.state_dict(),
-                "step": self.step,
-                "loss": self.current_loss,
-            },
-            path,
-        )
+        torch.save(state, path)
 
     def load_training_data(self) -> str:
         if self._training_text:
             return self._training_text
-        # Load all .txt files from data directory
         texts = []
         for fname in sorted(os.listdir(DATA_DIR)):
             if fname.endswith(".txt"):
                 with open(os.path.join(DATA_DIR, fname)) as f:
                     texts.append(f.read())
         if not texts:
-            # Fallback: generate some dummy training data
             texts = ["The quick brown fox jumps over the lazy dog. " * 1000]
         self._training_text = "\n".join(texts)
         return self._training_text
@@ -85,7 +139,6 @@ class TrainingOrchestrator:
         layer: int,
         op_name: str,
     ) -> list[TileTask]:
-        """Decompose a single linear layer forward pass into tile tasks."""
         return decompose_matmul(x, weight, step, layer, op_name, TILE_SIZE)
 
     def assemble_forward_result(
@@ -97,16 +150,9 @@ class TrainingOrchestrator:
         return assemble_tiles(tiles, M, N, TILE_SIZE)
 
     async def run_training_step(self, dispatch_fn) -> float:
-        """Execute one training step using distributed tile computation.
-
-        dispatch_fn: async callable that takes a list of TileTasks and returns
-                     dict of (i,j,k) -> result_tile for each task.
-        """
         self.model.train()
         x, y = self.get_batch()
 
-        # Forward pass using standard PyTorch (for MVP, tiled dispatch is used
-        # for the linear layers when workers are available)
         logits = self.model(x)
         B, T, V = logits.shape
         loss = self.loss_fn(logits.view(B * T, V), y.view(B * T))

@@ -12,3 +12,10 @@ JWT_EXPIRATION_HOURS = 24
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 SIGNUP_BONUS_TOKENS = 100
 TILE_SIZE = 64
+
+# S3-compatible bucket for model checkpoints
+S3_BUCKET = os.getenv("S3_BUCKET", "")
+S3_ACCESS_KEY_ID = os.getenv("S3_ACCESS_KEY_ID", "")
+S3_SECRET_ACCESS_KEY = os.getenv("S3_SECRET_ACCESS_KEY", "")
+S3_ENDPOINT = os.getenv("S3_ENDPOINT", "https://t3.storageapi.dev")
+S3_REGION = os.getenv("S3_REGION", "auto")
