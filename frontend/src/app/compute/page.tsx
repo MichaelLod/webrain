@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthContext } from "@/app/providers";
 import { useComputeWorker } from "@/hooks/use-compute-worker";
+import { api, TrainingStatus } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
 
 export default function ComputePage() {
-  const { user, loading } = useAuthContext();
+  const { user, loading, refetch } = useAuthContext();
   const router = useRouter();
   const {
     gpuInfo,
@@ -23,6 +24,8 @@ export default function ComputePage() {
     start,
     stop,
   } = useComputeWorker();
+  const [training, setTraining] = useState<TrainingStatus | null>(null);
+  const [sessionTime, setSessionTime] = useState(0);
 
   useEffect(() => {
     if (!loading && !user) router.push("/auth/login");
@@ -32,109 +35,240 @@ export default function ComputePage() {
     initWorker();
   }, [initWorker]);
 
+  useEffect(() => {
+    api.getTrainingStatus().then(setTraining).catch(() => {});
+    const interval = setInterval(() => {
+      api.getTrainingStatus().then(setTraining).catch(() => {});
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Session timer
+  useEffect(() => {
+    if (!running) return;
+    setSessionTime(0);
+    const interval = setInterval(() => setSessionTime((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [running]);
+
+  // Refetch user balance when tokens change
+  useEffect(() => {
+    if (tokensEarned > 0) refetch();
+  }, [tokensEarned, refetch]);
+
   if (loading || !user) return null;
+
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${sec.toString().padStart(2, "0")}`;
+  };
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
-      <h1 className="mb-2 text-3xl font-bold">Contribute Your Power</h1>
-      <p className="mb-6 text-zinc-500">
-        Every tile you compute pushes our collective AI forward. Your GPU, our model.
-      </p>
+      {/* Header */}
+      <div className="mb-8 text-center">
+        <h1 className="mb-2 text-3xl font-bold">Contribute Your Power</h1>
+        <p className="text-zinc-500">
+          Your GPU, our model. Every tile you compute makes the collective
+          smarter.
+        </p>
+      </div>
 
-      <Card className="mb-6 border-zinc-800 bg-zinc-900/50">
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            GPU Status
-            <Badge variant={supported ? "default" : "destructive"}>
-              {supported ? "WebGPU Ready" : "Not Supported"}
+      {/* Main control area */}
+      <Card className="relative mb-6 overflow-hidden border-zinc-800 bg-zinc-900/50">
+        {running && (
+          <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 via-transparent to-emerald-500/5" />
+        )}
+        <CardContent className="relative pt-6">
+          {/* GPU info row */}
+          <div className="mb-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div
+                className={`h-3 w-3 rounded-full ${
+                  running
+                    ? "animate-pulse bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]"
+                    : supported
+                      ? "bg-zinc-600"
+                      : "bg-red-500"
+                }`}
+              />
+              <div>
+                <div className="text-sm font-medium">
+                  {running ? "Contributing" : supported ? "Ready" : "Unavailable"}
+                </div>
+                <div className="text-xs text-zinc-500 font-mono">
+                  {gpuInfo || "Detecting GPU..."}
+                </div>
+              </div>
+            </div>
+            <Badge
+              variant={connected ? "default" : "secondary"}
+              className={connected ? "bg-emerald-900/50 text-emerald-400 border-emerald-800" : ""}
+            >
+              {connected ? "Connected" : "Offline"}
             </Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex justify-between text-sm">
-            <span className="text-zinc-400">GPU</span>
-            <span className="font-mono">{gpuInfo || "Detecting..."}</span>
           </div>
-          <Separator className="bg-zinc-800" />
-          <div className="flex justify-between text-sm">
-            <span className="text-zinc-400">Connection</span>
-            <span className={connected ? "text-emerald-400" : "text-zinc-500"}>
-              {connected ? "Connected" : "Disconnected"}
-            </span>
-          </div>
-        </CardContent>
-      </Card>
 
-      <Card className="mb-6 border-zinc-800 bg-zinc-900/50">
-        <CardHeader>
-          <CardTitle>Worker Control</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-4">
+          {/* Big button */}
+          {!running ? (
             <Button
               onClick={start}
-              disabled={!supported || running}
-              className="flex-1"
+              disabled={!supported}
+              size="lg"
+              className="w-full bg-amber-600 py-6 text-lg font-semibold hover:bg-amber-500 disabled:opacity-40"
             >
-              {running ? "Contributing..." : "Start Contributing"}
+              {!supported ? "WebGPU Not Available" : "Start Contributing"}
             </Button>
-            <Button
-              onClick={stop}
-              variant="outline"
-              disabled={!running}
-              className="flex-1"
-            >
-              Stop
-            </Button>
-          </div>
-
-          {running && (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-              <div className="mb-2 flex items-center gap-2">
-                <div className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
-                <span className="text-sm text-emerald-400">
-                  Your GPU is powering the people&apos;s AI...
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-zinc-400">Tasks Completed</span>
-                  <div className="text-xl font-bold">{tasksCompleted}</div>
+          ) : (
+            <div className="space-y-6">
+              {/* Live activity visualization */}
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-6">
+                <div className="mb-4 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex h-5 w-5 items-center justify-center">
+                      <div className="absolute h-5 w-5 animate-ping rounded-full bg-amber-500/30" />
+                      <div className="h-2.5 w-2.5 rounded-full bg-amber-500" />
+                    </div>
+                    <span className="text-sm font-medium text-amber-400">
+                      Your GPU is powering the people&apos;s AI
+                    </span>
+                  </div>
+                  <span className="font-mono text-xs text-zinc-500">
+                    {formatTime(sessionTime)}
+                  </span>
                 </div>
-                <div>
-                  <span className="text-zinc-400">Tokens Earned</span>
-                  <div className="text-xl font-bold text-violet-400">
-                    +{tokensEarned}
+
+                {/* Stats grid */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="rounded-lg bg-zinc-900/50 p-3 text-center">
+                    <div className="text-2xl font-bold tabular-nums">
+                      {tasksCompleted}
+                    </div>
+                    <div className="text-[11px] text-zinc-500 uppercase tracking-wider">
+                      Tiles
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-zinc-900/50 p-3 text-center">
+                    <div className="text-2xl font-bold tabular-nums text-amber-400">
+                      +{tokensEarned}
+                    </div>
+                    <div className="text-[11px] text-zinc-500 uppercase tracking-wider">
+                      Tokens
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-zinc-900/50 p-3 text-center">
+                    <div className="text-2xl font-bold tabular-nums text-emerald-400">
+                      {user.token_balance}
+                    </div>
+                    <div className="text-[11px] text-zinc-500 uppercase tracking-wider">
+                      Balance
+                    </div>
                   </div>
                 </div>
               </div>
+
+              <Button
+                onClick={stop}
+                variant="outline"
+                className="w-full border-zinc-700"
+              >
+                Stop Contributing
+              </Button>
             </div>
           )}
         </CardContent>
       </Card>
 
-      <Card className="border-zinc-800 bg-zinc-900/50">
-        <CardHeader>
-          <CardTitle>How your contribution works</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ol className="list-inside list-decimal space-y-2 text-sm text-zinc-400">
-            <li>
-              Training gets broken into tiny 64x64 matrix tiles that any device can handle
-            </li>
-            <li>
-              Your browser picks up a tile and runs it on your GPU via WebGPU
-            </li>
-            <li>
-              The result flows back and gets assembled with everyone else&apos;s work
-            </li>
-            <li>You earn tokens for every tile &mdash; fair exchange for your contribution</li>
-            <li>
-              Together, thousands of browsers train one shared AI
-            </li>
-          </ol>
+      {/* Collective status */}
+      <Card className="mb-6 border-zinc-800 bg-zinc-900/50">
+        <CardContent className="pt-6">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
+              The Collective
+            </h3>
+            {training?.is_training && (
+              <Badge variant="secondary" className="bg-emerald-900/30 text-emerald-400 border-emerald-800 text-[10px]">
+                Training Active
+              </Badge>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div>
+              <div className="text-lg font-bold tabular-nums">
+                {training?.connected_workers ?? 0}
+              </div>
+              <div className="text-xs text-zinc-500">Contributors online</div>
+            </div>
+            <div>
+              <div className="text-lg font-bold tabular-nums">
+                {training?.current_step?.toLocaleString() ?? 0}
+              </div>
+              <div className="text-xs text-zinc-500">Training steps</div>
+            </div>
+            <div>
+              <div className="text-lg font-bold tabular-nums text-emerald-400">
+                {training?.current_loss?.toFixed(4) ?? "N/A"}
+              </div>
+              <div className="text-xs text-zinc-500">Loss (lower = smarter)</div>
+            </div>
+            <div>
+              <div className="text-lg font-bold tabular-nums">
+                v{training?.model_version ?? 1}
+              </div>
+              <div className="text-xs text-zinc-500">Model version</div>
+            </div>
+          </div>
+          {training && training.current_step > 0 && (
+            <div className="mt-4">
+              <div className="mb-1 flex justify-between text-[11px] text-zinc-500">
+                <span>Training progress</span>
+                <span>{training.current_step.toLocaleString()} steps</span>
+              </div>
+              <Progress
+                value={Math.min((training.current_step / 10000) * 100, 100)}
+                className="h-1.5"
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {/* How it works - collapsed */}
+      <details className="group rounded-lg border border-zinc-800 bg-zinc-900/50">
+        <summary className="cursor-pointer px-6 py-4 text-sm font-medium text-zinc-400 hover:text-white transition-colors">
+          How your contribution works
+        </summary>
+        <div className="border-t border-zinc-800 px-6 py-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[
+              {
+                icon: "01",
+                text: "Training gets broken into tiny 64x64 matrix tiles",
+              },
+              {
+                icon: "02",
+                text: "Your browser picks up a tile and runs it on your GPU",
+              },
+              {
+                icon: "03",
+                text: "Results get assembled with everyone else\u2019s work",
+              },
+              {
+                icon: "04",
+                text: "You earn tokens \u2014 fair exchange for your contribution",
+              },
+            ].map((step) => (
+              <div key={step.icon} className="flex gap-3 text-sm">
+                <span className="shrink-0 font-bold text-amber-500/60">
+                  {step.icon}
+                </span>
+                <span className="text-zinc-400">{step.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </details>
     </div>
   );
 }
