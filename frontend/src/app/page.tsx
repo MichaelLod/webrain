@@ -183,7 +183,7 @@ export default function Landing() {
           </h2>
           <p className="mb-8 text-zinc-400">
             Every browser counts. Every tile matters. This is AI that doesn&apos;t
-            belong to a boardroom \u2014 it belongs to you.
+            belong to a boardroom &mdash; it belongs to you.
           </p>
           <Link href="/auth/register">
             <Button size="lg" className="bg-amber-600 px-10 text-white hover:bg-amber-500">
@@ -196,7 +196,7 @@ export default function Landing() {
       {/* Footer */}
       <footer className="border-t border-zinc-800 py-8">
         <div className="mx-auto max-w-4xl px-4 text-center text-sm text-zinc-600">
-          WeBrain \u2014 AI from the people, for the people.
+          WeBrain &mdash; AI from the people, for the people.
         </div>
       </footer>
     </main>
