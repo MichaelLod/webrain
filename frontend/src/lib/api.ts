@@ -49,6 +49,19 @@ export const api = {
   getLeaderboard: (limit = 20) =>
     apiFetch<LeaderboardResponse>(`/api/v1/leaderboard?limit=${limit}`),
 
+  submitData: (url: string, content_type = "text") =>
+    apiFetch<DataSubmission>("/api/v1/data/submit", {
+      method: "POST",
+      body: JSON.stringify({ url, content_type }),
+    }),
+
+  getDataSubmissions: (limit = 50) =>
+    apiFetch<{ submissions: DataSubmission[]; total: number }>(
+      `/api/v1/data/submissions?limit=${limit}`
+    ),
+
+  getDataStats: () => apiFetch<DataStats>("/api/v1/data/stats"),
+
   sendChat: async function* (message: string, conversationId?: string) {
     const token = localStorage.getItem("token");
     const res = await fetch(`${API_URL}/api/v1/chat/send`, {
@@ -115,6 +128,22 @@ export interface LeaderboardResponse {
   total_contributors: number;
   total_tiles: number;
   total_compute_time_ms: number;
+}
+
+export interface DataSubmission {
+  id: number;
+  url: string;
+  content_type: string;
+  status: string;
+  title: string | null;
+  created_at: string;
+}
+
+export interface DataStats {
+  total_submissions: number;
+  ready_count: number;
+  total_text_chars: number;
+  contributors: number;
 }
 
 export interface TrainingStatus {

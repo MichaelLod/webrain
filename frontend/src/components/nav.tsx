@@ -39,6 +39,7 @@ export function Nav() {
               {navLink("/compute", "Contribute")}
               {navLink("/chat", "Chat")}
               {navLink("/leaderboard", "Leaderboard")}
+              {navLink("/data", "Data")}
             </>
           )}
         </div>

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import CORS_ORIGINS
 from app.core.database import Base, engine
-from app.api.v1 import auth, tokens, compute, chat, leaderboard
+from app.api.v1 import auth, tokens, compute, chat, leaderboard, data
 
 
 @asynccontextmanager
@@ -35,6 +35,7 @@ app.include_router(tokens.router, prefix="/api/v1/tokens", tags=["tokens"])
 app.include_router(compute.router, prefix="/api/v1/compute", tags=["compute"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
 app.include_router(leaderboard.router, prefix="/api/v1/leaderboard", tags=["leaderboard"])
+app.include_router(data.router, prefix="/api/v1/data", tags=["data"])
 
 
 @app.get("/api/health")

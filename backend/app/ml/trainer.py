@@ -111,15 +111,43 @@ class TrainingOrchestrator:
     def load_training_data(self) -> str:
         if self._training_text:
             return self._training_text
+
         texts = []
-        for fname in sorted(os.listdir(DATA_DIR)):
-            if fname.endswith(".txt"):
-                with open(os.path.join(DATA_DIR, fname)) as f:
-                    texts.append(f.read())
+
+        # Load from local files
+        if os.path.isdir(DATA_DIR):
+            for fname in sorted(os.listdir(DATA_DIR)):
+                if fname.endswith(".txt"):
+                    with open(os.path.join(DATA_DIR, fname)) as f:
+                        texts.append(f.read())
+
+        # Load from database (user-submitted URLs)
+        try:
+            import asyncio
+            texts += asyncio.get_event_loop().run_until_complete(self._load_db_texts())
+        except Exception as e:
+            log.warning("Failed to load DB texts: %s", e)
+
         if not texts:
             texts = ["The quick brown fox jumps over the lazy dog. " * 1000]
+
         self._training_text = "\n".join(texts)
+        log.info("Loaded training data: %d chars from %d sources", len(self._training_text), len(texts))
         return self._training_text
+
+    @staticmethod
+    async def _load_db_texts() -> list[str]:
+        from app.core.database import async_session
+        from app.models.data_submission import DataSubmission, SubmissionStatus
+        from sqlalchemy import select
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(DataSubmission.extracted_text)
+                .where(DataSubmission.status == SubmissionStatus.READY)
+                .where(DataSubmission.extracted_text.isnot(None))
+            )
+            return [row[0] for row in result.all() if row[0] and len(row[0]) > 50]
 
     def get_batch(self, batch_size: int = 32, seq_len: int = 128) -> tuple[torch.Tensor, torch.Tensor]:
         text = self.load_training_data()
