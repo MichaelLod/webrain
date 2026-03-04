@@ -8,13 +8,35 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
-import { api, ComputeStats, TokenTransaction, TrainingStatus } from "@/lib/api";
+import { api, ComputeStats, ModelInfo, TokenTransaction, TrainingStatus } from "@/lib/api";
+
+function formatParams(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return n.toString();
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "N/A";
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
+  if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
+function formatChars(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return n.toString();
+}
 
 export default function DashboardPage() {
   const { user, loading } = useAuthContext();
   const router = useRouter();
   const [stats, setStats] = useState<ComputeStats | null>(null);
   const [training, setTraining] = useState<TrainingStatus | null>(null);
+  const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [history, setHistory] = useState<TokenTransaction[]>([]);
 
   useEffect(() => {
@@ -25,6 +47,7 @@ export default function DashboardPage() {
     if (!user) return;
     api.getComputeStats().then(setStats).catch(() => {});
     api.getTrainingStatus().then(setTraining).catch(() => {});
+    api.getModelInfo().then(setModelInfo).catch(() => {});
     api.getHistory(20).then(setHistory).catch(() => {});
     const interval = setInterval(() => {
       api.getTrainingStatus().then(setTraining).catch(() => {});
@@ -198,6 +221,74 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Model Info */}
+      {modelInfo && (
+        <Card className="mt-6 border-zinc-800 bg-zinc-900/50">
+          <CardHeader className="pb-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Model Details</CardTitle>
+              <span className="rounded-full border border-amber-800/50 bg-amber-950/40 px-2.5 py-0.5 text-[11px] font-medium text-amber-400">
+                {modelInfo.name}
+              </span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-zinc-400">Total parameters</span>
+                <span className="font-mono text-sm font-bold text-amber-400">
+                  {formatParams(modelInfo.total_parameters)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-zinc-400">Text model</span>
+                <span className="font-mono text-sm">
+                  {formatParams(modelInfo.text_parameters)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-zinc-400">Vision encoder</span>
+                <span className="font-mono text-sm">
+                  {formatParams(modelInfo.vision_parameters)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-zinc-400">Architecture</span>
+                <span className="text-sm text-zinc-300">
+                  {modelInfo.n_layers}L / {modelInfo.n_heads}H / d{modelInfo.d_model}
+                </span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-zinc-400">Feed-forward dim</span>
+                <span className="font-mono text-sm">{modelInfo.d_ff}</span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-zinc-400">Vocabulary</span>
+                <span className="text-sm text-zinc-300">
+                  {modelInfo.vocab_size} tokens (char-level)
+                </span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-zinc-400">Max context</span>
+                <span className="font-mono text-sm">{modelInfo.max_seq_len}</span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-zinc-400">Training data</span>
+                <span className="text-sm text-zinc-300">
+                  {formatChars(modelInfo.training_data_chars)} chars / {modelInfo.training_data_sources} sources
+                </span>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-zinc-400">Checkpoint size</span>
+                <span className="font-mono text-sm">
+                  {formatBytes(modelInfo.checkpoint_size_bytes)}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Transaction history */}
       <Card className="mt-6 border-zinc-800 bg-zinc-900/50">

@@ -279,7 +279,7 @@ export default function ChatPage() {
                 </button>
               </div>
             )}
-            <div className="flex gap-2 items-end">
+            <div className="flex gap-2 items-center">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -323,20 +323,20 @@ export default function ChatPage() {
                   placeholder={selectedImage ? "Describe this image..." : "Type a message..."}
                   disabled={streaming}
                   rows={1}
-                  className="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 pr-16 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-amber-800 focus:outline-none focus:ring-1 focus:ring-amber-800/50 disabled:opacity-50"
+                  className="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2.5 pr-20 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-amber-800 focus:outline-none focus:ring-1 focus:ring-amber-800/50 disabled:opacity-50"
                 />
-                <div className="absolute bottom-2 right-2">
+                <div className="absolute right-2 top-1/2 -translate-y-1/2">
                   <Button
                     onClick={send}
                     disabled={streaming || !input.trim()}
                     size="sm"
-                    className="h-7 bg-amber-600 px-3 text-xs hover:bg-amber-500 disabled:opacity-30"
+                    className="h-8 bg-amber-600 px-3 text-xs hover:bg-amber-500 disabled:opacity-30"
                   >
                     {streaming ? (
-                      <span className="flex items-center gap-1">
-                        <span className="h-1 w-1 animate-pulse rounded-full bg-white" />
-                        <span className="h-1 w-1 animate-pulse rounded-full bg-white [animation-delay:150ms]" />
-                        <span className="h-1 w-1 animate-pulse rounded-full bg-white [animation-delay:300ms]" />
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white [animation-delay:150ms]" />
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white [animation-delay:300ms]" />
                       </span>
                     ) : (
                       "Send"

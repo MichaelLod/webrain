@@ -46,6 +46,8 @@ export const api = {
   getTrainingStatus: () =>
     apiFetch<TrainingStatus>("/api/v1/compute/training-status"),
 
+  getModelInfo: () => apiFetch<ModelInfo>("/api/v1/compute/model-info"),
+
   getLeaderboard: (limit = 20) =>
     apiFetch<LeaderboardResponse>(`/api/v1/leaderboard?limit=${limit}`),
 
@@ -193,4 +195,24 @@ export interface TrainingStatus {
   model_version: number;
   connected_workers: number;
   is_training: boolean;
+}
+
+export interface ModelInfo {
+  name: string;
+  total_parameters: number;
+  text_parameters: number;
+  vision_parameters: number;
+  architecture: string;
+  n_layers: number;
+  n_heads: number;
+  d_model: number;
+  d_ff: number;
+  vocab_size: number;
+  max_seq_len: number;
+  tokenizer: string;
+  training_steps: number;
+  current_loss: number;
+  training_data_chars: number;
+  training_data_sources: number;
+  checkpoint_size_bytes: number;
 }

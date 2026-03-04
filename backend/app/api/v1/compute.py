@@ -26,6 +26,26 @@ class TrainingStatusResponse(BaseModel):
     is_training: bool
 
 
+class ModelInfoResponse(BaseModel):
+    name: str
+    total_parameters: int
+    text_parameters: int
+    vision_parameters: int
+    architecture: str
+    n_layers: int
+    n_heads: int
+    d_model: int
+    d_ff: int
+    vocab_size: int
+    max_seq_len: int
+    tokenizer: str
+    training_steps: int
+    current_loss: float
+    training_data_chars: int
+    training_data_sources: int
+    checkpoint_size_bytes: int
+
+
 @router.get("/stats", response_model=StatsResponse)
 async def get_compute_stats(
     user_id: int = Depends(get_current_user_id),
@@ -56,6 +76,55 @@ async def get_training_status():
         model_version=1,
         connected_workers=manager.worker_count,
         is_training=manager.is_training,
+    )
+
+
+@router.get("/model-info", response_model=ModelInfoResponse)
+async def get_model_info(db: AsyncSession = Depends(get_db)):
+    from app.ml.trainer import trainer
+    from app.models.data_submission import DataSubmission, SubmissionStatus
+
+    text_params = sum(p.numel() for p in trainer.model.parameters())
+    vision_params = sum(p.numel() for p in trainer.vision_encoder.parameters())
+    cfg = trainer.cfg
+
+    # Training data stats
+    chars_q = await db.execute(
+        select(
+            func.coalesce(func.sum(func.length(DataSubmission.extracted_text)), 0),
+            func.count(DataSubmission.id),
+        ).where(DataSubmission.status == SubmissionStatus.READY)
+        .where(DataSubmission.extracted_text.isnot(None))
+    )
+    row = chars_q.one()
+    data_chars = row[0] or 0
+    data_sources = row[1] or 0
+
+    # Checkpoint size
+    checkpoint_bytes = 0
+    import os
+    local_ckpt = os.path.join(os.path.dirname(__file__), "../../ml/checkpoints/latest.pt")
+    if os.path.exists(local_ckpt):
+        checkpoint_bytes = os.path.getsize(local_ckpt)
+
+    return ModelInfoResponse(
+        name="TinyGPT",
+        total_parameters=text_params + vision_params,
+        text_parameters=text_params,
+        vision_parameters=vision_params,
+        architecture=f"{cfg.n_layers}-layer Transformer + 2-layer Vision Encoder",
+        n_layers=cfg.n_layers,
+        n_heads=cfg.n_heads,
+        d_model=cfg.d_model,
+        d_ff=cfg.d_ff,
+        vocab_size=cfg.vocab_size,
+        max_seq_len=cfg.max_seq_len,
+        tokenizer="character-level (256 tokens)",
+        training_steps=trainer.step,
+        current_loss=trainer.current_loss,
+        training_data_chars=data_chars,
+        training_data_sources=data_sources,
+        checkpoint_size_bytes=checkpoint_bytes,
     )
 
 
