@@ -46,6 +46,9 @@ export const api = {
   getTrainingStatus: () =>
     apiFetch<TrainingStatus>("/api/v1/compute/training-status"),
 
+  getLeaderboard: (limit = 20) =>
+    apiFetch<LeaderboardResponse>(`/api/v1/leaderboard?limit=${limit}`),
+
   sendChat: async function* (message: string, conversationId?: string) {
     const token = localStorage.getItem("token");
     const res = await fetch(`${API_URL}/api/v1/chat/send`, {
@@ -98,6 +101,20 @@ export interface ComputeStats {
   tasks_completed: number;
   total_compute_time_ms: number;
   tokens_earned: number;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  display_name: string;
+  tiles_computed: number;
+  tokens_earned: number;
+}
+
+export interface LeaderboardResponse {
+  top_contributors: LeaderboardEntry[];
+  total_contributors: number;
+  total_tiles: number;
+  total_compute_time_ms: number;
 }
 
 export interface TrainingStatus {

@@ -45,7 +45,7 @@ export default function Landing() {
                 Join the Movement
               </Button>
             </Link>
-            <Link href="/dashboard">
+            <Link href="/leaderboard">
               <Button variant="outline" size="lg" className="border-zinc-700">
                 See Our Progress
               </Button>
