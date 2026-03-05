@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, LeaderboardResponse, TrainingStatus } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useAuthContext } from "@/app/providers";
 
@@ -21,6 +22,12 @@ export default function LeaderboardPage() {
     return () => clearInterval(interval);
   }, []);
 
+  const networkMode = training?.pipeline_active
+    ? "Pipeline"
+    : (training?.connected_workers ?? 0) > 0
+      ? "Swarm"
+      : "Server Only";
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
       {/* Header */}
@@ -35,7 +42,46 @@ export default function LeaderboardPage() {
       <Card className="mb-6 border-zinc-800 bg-zinc-900/50 overflow-hidden relative">
         <div className="absolute inset-0 bg-gradient-to-br from-amber-600/5 via-transparent to-emerald-600/5" />
         <CardContent className="relative pt-6">
-          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {/* Network mode + collective intelligence */}
+          <div className="mb-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant="secondary"
+                  className={
+                    training?.pipeline_active
+                      ? "bg-purple-900/30 text-purple-400 border-purple-800 text-[10px]"
+                      : (training?.connected_workers ?? 0) > 0
+                        ? "bg-amber-900/30 text-amber-400 border-amber-800 text-[10px]"
+                        : "bg-zinc-800 text-zinc-500 text-[10px]"
+                  }
+                >
+                  {networkMode}
+                </Badge>
+                {training?.pipeline_active && (
+                  <Badge variant="secondary" className="bg-zinc-800 text-zinc-400 text-[10px]">
+                    {training.pipeline_stages} stages
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                {training?.is_training && (
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+                )}
+                <span className="text-xs text-zinc-500">
+                  {training?.is_training ? "Training" : "Idle"}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-zinc-500">Collective Intelligence</span>
+              <span className="text-sm font-bold text-amber-400 tabular-nums">
+                {Math.round((training?.collective_intelligence ?? 0.25) * 100)}%
+              </span>
+            </div>
+          </div>
+
+          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-5">
             <div className="text-center">
               <div className="text-3xl font-bold tabular-nums text-amber-400">
                 {training?.current_step?.toLocaleString() ?? 0}
@@ -47,7 +93,7 @@ export default function LeaderboardPage() {
                 {training?.current_loss?.toFixed(4) ?? "N/A"}
               </div>
               <div className="mt-1 text-xs text-zinc-500">
-                Model Loss <span className="text-zinc-600">(lower = smarter)</span>
+                Model Loss
               </div>
             </div>
             <div className="text-center">
@@ -55,6 +101,12 @@ export default function LeaderboardPage() {
                 {training?.connected_workers ?? 0}
               </div>
               <div className="mt-1 text-xs text-zinc-500">Contributors Online</div>
+            </div>
+            <div className="text-center">
+              <div className="text-3xl font-bold tabular-nums">
+                {training?.active_experts ?? 1} / 4
+              </div>
+              <div className="mt-1 text-xs text-zinc-500">Experts Active</div>
             </div>
             <div className="text-center">
               <div className="text-3xl font-bold tabular-nums">
@@ -67,12 +119,7 @@ export default function LeaderboardPage() {
           {training && training.current_step > 0 && (
             <div>
               <div className="mb-1.5 flex justify-between text-[11px] text-zinc-500">
-                <span className="flex items-center gap-1.5">
-                  {training.is_training && (
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-                  )}
-                  {training.is_training ? "Training in progress" : "Training idle"}
-                </span>
+                <span>Training progress</span>
                 <span>
                   {((training.current_step / 10000) * 100).toFixed(1)}% to next milestone
                 </span>
@@ -102,7 +149,7 @@ export default function LeaderboardPage() {
               <div className="text-2xl font-bold tabular-nums text-amber-400">
                 {data.total_tiles.toLocaleString()}
               </div>
-              <div className="mt-1 text-xs text-zinc-500">Tiles Computed</div>
+              <div className="mt-1 text-xs text-zinc-500">Tasks Completed</div>
             </CardContent>
           </Card>
           <Card className="border-zinc-800 bg-zinc-900/50">
@@ -137,7 +184,7 @@ export default function LeaderboardPage() {
               <div className="grid grid-cols-12 px-3 py-2 text-[11px] uppercase tracking-wider text-zinc-600">
                 <div className="col-span-1">#</div>
                 <div className="col-span-5">Contributor</div>
-                <div className="col-span-3 text-right">Tiles</div>
+                <div className="col-span-3 text-right">Tasks</div>
                 <div className="col-span-3 text-right">Tokens Earned</div>
               </div>
 

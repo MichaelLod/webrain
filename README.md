@@ -1,33 +1,68 @@
 # WeBrain
 
-**AI from the people, for the people.**
+**The AI that lives in browsers.**
 
-WeBrain is an open-source platform where anyone with a browser can contribute GPU compute to train a shared language model from scratch. No data centers. No corporations. Just people pooling their browsers to build AI that belongs to everyone.
+WeBrain is an open-source platform that distributes a language model across browser peers. No data centers, no corporations — just people pooling their GPUs through WebGPU to train, store, and run AI that belongs to everyone.
 
 ## How it works
 
 1. **Sign up** and get 100 free tokens
-2. **Contribute** — your browser picks up tiny 64x64 matrix tiles and computes them on your GPU via WebGPU
-3. **Earn & chat** — earn tokens for every tile, spend them to talk to the model as it gets smarter
+2. **Contribute** — your browser loads transformer layers and computes forward passes via WebGPU
+3. **Earn & chat** — earn tokens for every computation, spend them to talk to the model as it grows
 
-The server decomposes every matrix multiplication in the training loop into small tile operations and distributes them to connected browsers. Each browser computes a single tile matmul and sends the result back. The server assembles everything and runs the training step. The model never needs to fit in a single GPU — it scales with the number of contributors.
+The model lives across the network. Each browser stores and computes a subset of transformer layers, with activations flowing between peers. More browsers = more compute, more storage, smarter model.
 
 ## Architecture
 
 ```
-Browser Workers (many)              Server
-┌──────────────────┐        ┌──────────────────────────────┐
-│  WebGPU Worker   │   WS   │  Training Orchestrator        │
-│  ┌────────────┐  │◄──────►│  - Tile decomposition         │
-│  │ tile matmul│  │        │  - Tile assembly               │
-│  │ [64x64]    │  │        │  - Model weights (PyTorch)     │
-│  └────────────┘  │        │  - Optimizer, loss, activations│
-│  Stateless.      │        │  - Inference for chat          │
-└──────────────────┘        └──────────────────────────────┘
+                          WebRTC (direct P2P)
+                    ┌─────────────────────────────┐
+                    │                               │
+                    ▼                               ▼
+┌─────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌─────────┐
+│  Server  │───▶│ Browser A│───▶│ Browser B│───▶│ Browser C│───▶│  Server │
+│  embed   │    │ layers   │    │ layers   │    │ layers   │    │  head   │
+│          │    │  0 – 3   │    │  4 – 7   │    │  8 – 11  │    │         │
+└─────────┘    └──────────┘    └──────────┘    └──────────┘    └─────────┘
+    │               │               │               │               │
+    └───────────────┴───────────────┴───────────────┴───────────────┘
+                        WebSocket fallback relay
 ```
 
-- **Browsers** only compute tiny matrix tiles. Stateless. No model knowledge.
-- **Server** handles everything else: weights, tiling, activations, loss, gradients, optimizer, data loading.
+### Scaling modes
+
+| Browsers | Mode | How it works |
+|----------|------|-------------|
+| 0 | Server Only | Full model runs on the server |
+| 1 | Swarm | FFN split into 4 expert slices; browser computes 3, server computes 1 |
+| 2–3 | Pipeline | Each browser handles a range of transformer layers, activations relayed via server |
+| 4+ | Full P2P | Pipeline with WebRTC — activations flow browser-to-browser, bypassing the server |
+
+### Key features
+
+- **Pipeline parallelism** — transformer layers distributed across browser peers
+- **WebRTC P2P** — direct browser-to-browser activation transfer for 4+ peers
+- **IndexedDB persistence** — weights survive tab close, no re-download on return
+- **Shard replication** — each layer stored on 2+ browsers for fault tolerance
+- **Distributed training** — forward/backward passes flow through the pipeline
+- **fp16 transfer** — half-precision weight downloads, converted to fp32 for WebGPU
+- **Automatic fallback** — pipeline hops fall back to server relay if WebRTC fails
+
+## The model
+
+WeBrainGPT — 45M parameter multimodal transformer:
+
+| Spec | Value |
+|------|-------|
+| Layers | 12 |
+| Hidden dim | 512 |
+| FFN dim | 1376 (SwiGLU) |
+| Attention | GQA (8 heads, 4 KV heads) |
+| Position encoding | RoPE |
+| Normalization | RMSNorm |
+| Tokenizer | BPE (32K vocab) |
+| Max context | 512 tokens |
+| Vision | 2-layer patch encoder |
 
 ## Tech stack
 
@@ -37,7 +72,9 @@ Browser Workers (many)              Server
 | Backend | Python, FastAPI, PyTorch, SQLAlchemy |
 | Database | PostgreSQL 16 |
 | Compute | WebGPU (WGSL shaders) in Web Workers |
-| Communication | REST + WebSocket (tiles) + SSE (chat) |
+| P2P | WebRTC DataChannels + WebSocket signaling |
+| Storage | IndexedDB (browser weights), sharded checkpoints (server) |
+| Communication | REST + WebSocket + SSE (chat) + WebRTC (activations) |
 
 ## Getting started
 
@@ -68,31 +105,52 @@ npm run dev
 
 Open http://localhost:3000 — register, contribute compute, and chat.
 
-## The model
-
-Tiny GPT-2 style transformer (~0.9M params):
-- 4 transformer layers, 128 hidden dim, 4 attention heads
-- Character-level tokenizer (256 vocab)
-- The tiled architecture means this scales to any model size as the community grows
-
 ## Token economy
 
 | Action | Tokens |
 |--------|--------|
 | Sign up bonus | +100 |
-| Per tile computed | +1 (min), scales with compute time |
+| Per task computed | +1 (min), scales with compute time |
 | Per chat message | -10 |
+
+## Project structure
+
+```
+webrain/
+├── frontend/                  # Next.js app
+│   └── src/
+│       ├── app/               # Pages (landing, auth, dashboard, compute, chat, data)
+│       ├── components/        # UI components (shadcn/ui)
+│       ├── workers/           # WebGPU compute
+│       │   ├── gpu-engine.ts          # WebGPU matmul + FFN engine
+│       │   ├── compute-worker.ts      # Web Worker message handler
+│       │   ├── pipeline-engine.ts     # Full transformer layer computation
+│       │   ├── training-engine.ts     # Forward/backward for distributed training
+│       │   └── shaders/               # WGSL shaders (matmul, rmsnorm, rope, softmax)
+│       ├── hooks/             # React hooks (auth, compute worker)
+│       └── lib/               # API client, WebSocket, WebRTC, P2P protocol, weight store
+├── backend/                   # FastAPI app
+│   └── app/
+│       ├── api/v1/            # Routes (auth, tokens, compute, chat, data, weights)
+│       ├── models/            # SQLAlchemy models
+│       ├── services/          # Compute manager, shard registry, pipeline scheduler,
+│       │                      # signaling, replication, weight server
+│       ├── core/              # Config, database, security
+│       └── ml/                # Model, trainer, inference, pipeline inference,
+│                              # distributed trainer, sharded checkpoints, swarm
+└── docker-compose.yml         # PostgreSQL
+```
 
 ## Contributing
 
-This is a community project. Contributions of all kinds are welcome:
+This is a community project. Contributions welcome:
 
-- **Code** — features, bug fixes, performance improvements
-- **Training data** — curate and contribute text corpora
-- **Testing** — try it out, report bugs, suggest improvements
-- **Ideas** — open an issue, start a discussion
+- **Code** — features, bug fixes, performance
+- **Training data** — submit URLs through the Data page
+- **Testing** — try it out, report bugs
+- **Ideas** — open an issue
 
-### Development setup
+### Development
 
 1. Fork the repo
 2. Create a branch (`git checkout -b feature/your-thing`)
@@ -100,29 +158,6 @@ This is a community project. Contributions of all kinds are welcome:
 4. Run the frontend build (`cd frontend && npm run build`)
 5. Open a PR
 
-See [open issues](../../issues) for things to work on.
-
-## Project structure
-
-```
-webrain/
-├── frontend/              # Next.js app
-│   └── src/
-│       ├── app/           # Pages (landing, auth, dashboard, compute, chat)
-│       ├── components/    # UI components
-│       ├── workers/       # WebGPU compute (WGSL shader, GPU engine, worker)
-│       ├── hooks/         # React hooks (auth, compute worker)
-│       └── lib/           # API client, WebSocket client
-├── backend/               # FastAPI app
-│   └── app/
-│       ├── api/v1/        # Routes (auth, tokens, compute, chat)
-│       ├── models/        # SQLAlchemy models
-│       ├── services/      # Token service, compute manager
-│       ├── core/          # Config, database, security
-│       └── ml/            # Model, tiling engine, trainer, inference
-└── docker-compose.yml     # PostgreSQL
-```
-
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE). Use it, fork it, build on it.
+Apache 2.0 — see [LICENSE](LICENSE).

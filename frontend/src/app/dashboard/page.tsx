@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuthContext } from "@/app/providers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
@@ -63,6 +64,12 @@ export default function DashboardPage() {
     .filter((tx) => tx.amount < 0)
     .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
 
+  const networkMode = training?.pipeline_active
+    ? "Pipeline"
+    : (training?.connected_workers ?? 0) > 0
+      ? "Swarm"
+      : "Server Only";
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
       {/* Welcome header */}
@@ -98,7 +105,7 @@ export default function DashboardPage() {
             <div className="text-4xl font-bold text-emerald-400 tabular-nums">
               {earned}
             </div>
-            <div className="text-xs text-zinc-600 mt-1">from computing tiles</div>
+            <div className="text-xs text-zinc-600 mt-1">from compute contributions</div>
           </div>
           <div>
             <div className="text-sm text-zinc-500 mb-1">Total Spent</div>
@@ -118,7 +125,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-zinc-400">Tiles computed</span>
+              <span className="text-sm text-zinc-400">Tasks completed</span>
               <span className="font-bold tabular-nums">
                 {stats?.tasks_completed ?? 0}
               </span>
@@ -160,25 +167,67 @@ export default function DashboardPage() {
           <CardHeader className="pb-4">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">The Collective</CardTitle>
-              <div className="flex items-center gap-1.5">
-                <div
-                  className={`h-2 w-2 rounded-full ${
-                    training?.is_training
-                      ? "animate-pulse bg-emerald-400"
-                      : "bg-zinc-600"
-                  }`}
-                />
-                <span className="text-xs text-zinc-500">
-                  {training?.is_training ? "Training" : "Idle"}
-                </span>
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant="secondary"
+                  className={
+                    training?.pipeline_active
+                      ? "bg-purple-900/30 text-purple-400 border-purple-800 text-[10px]"
+                      : (training?.connected_workers ?? 0) > 0
+                        ? "bg-amber-900/30 text-amber-400 border-amber-800 text-[10px]"
+                        : "bg-zinc-800 text-zinc-500 text-[10px]"
+                  }
+                >
+                  {networkMode}
+                </Badge>
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className={`h-2 w-2 rounded-full ${
+                      training?.is_training
+                        ? "animate-pulse bg-emerald-400"
+                        : "bg-zinc-600"
+                    }`}
+                  />
+                  <span className="text-xs text-zinc-500">
+                    {training?.is_training ? "Training" : "Idle"}
+                  </span>
+                </div>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Collective Intelligence */}
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-sm text-zinc-400">Collective Intelligence</span>
+                <span className="text-sm font-bold text-amber-400 tabular-nums">
+                  {Math.round((training?.collective_intelligence ?? 0.25) * 100)}%
+                </span>
+              </div>
+              <div className="relative h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-700"
+                  style={{
+                    width: `${Math.round((training?.collective_intelligence ?? 0.25) * 100)}%`,
+                  }}
+                />
+              </div>
+              <div className="mt-1 text-[11px] text-zinc-600">
+                {training?.active_experts ?? 1} / 4 experts active
+              </div>
+            </div>
+            <Separator className="bg-zinc-800" />
             <div className="flex items-center justify-between">
-              <span className="text-sm text-zinc-400">Active contributors</span>
+              <span className="text-sm text-zinc-400">Contributors online</span>
               <span className="font-bold tabular-nums">
                 {training?.connected_workers ?? 0}
+              </span>
+            </div>
+            <Separator className="bg-zinc-800" />
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-zinc-400">Pipeline stages</span>
+              <span className="font-bold tabular-nums">
+                {training?.pipeline_stages ?? 0}
               </span>
             </div>
             <Separator className="bg-zinc-800" />
@@ -194,11 +243,6 @@ export default function DashboardPage() {
               <span className="font-mono text-sm text-emerald-400">
                 {training?.current_loss?.toFixed(4) ?? "N/A"}
               </span>
-            </div>
-            <Separator className="bg-zinc-800" />
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-zinc-400">Model version</span>
-              <span className="font-bold">v{training?.model_version ?? 1}</span>
             </div>
 
             {training && training.current_step > 0 && (
