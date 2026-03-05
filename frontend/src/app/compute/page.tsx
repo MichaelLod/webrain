@@ -20,6 +20,8 @@ export default function ComputePage() {
     running,
     tasksCompleted,
     tokensEarned,
+    pipelineAssignment,
+    peerConnections,
     initWorker,
     start,
     stop,
@@ -43,7 +45,6 @@ export default function ComputePage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Session timer
   useEffect(() => {
     if (!running) return;
     setSessionTime(0);
@@ -51,7 +52,6 @@ export default function ComputePage() {
     return () => clearInterval(interval);
   }, [running]);
 
-  // Refetch user balance when tokens change
   useEffect(() => {
     if (tokensEarned > 0) refetch();
   }, [tokensEarned, refetch]);
@@ -70,7 +70,7 @@ export default function ComputePage() {
       <div className="mb-8 text-center">
         <h1 className="mb-2 text-3xl font-bold">Contribute Your Power</h1>
         <p className="text-zinc-500">
-          Your GPU, our model. Every tile you compute makes the collective
+          Your GPU, our model. Every computation you run makes the collective
           smarter.
         </p>
       </div>
@@ -102,12 +102,19 @@ export default function ComputePage() {
                 </div>
               </div>
             </div>
-            <Badge
-              variant={connected ? "default" : "secondary"}
-              className={connected ? "bg-emerald-900/50 text-emerald-400 border-emerald-800" : ""}
-            >
-              {connected ? "Connected" : "Offline"}
-            </Badge>
+            <div className="flex items-center gap-2">
+              {pipelineAssignment && (
+                <Badge className="bg-purple-900/50 text-purple-400 border-purple-800 text-[10px]">
+                  Layers {pipelineAssignment.startLayer}-{pipelineAssignment.endLayer - 1}
+                </Badge>
+              )}
+              <Badge
+                variant={connected ? "default" : "secondary"}
+                className={connected ? "bg-emerald-900/50 text-emerald-400 border-emerald-800" : ""}
+              >
+                {connected ? "Connected" : "Offline"}
+              </Badge>
+            </div>
           </div>
 
           {/* Big button */}
@@ -146,7 +153,7 @@ export default function ComputePage() {
                       {tasksCompleted}
                     </div>
                     <div className="text-[11px] text-zinc-500 uppercase tracking-wider">
-                      Tiles
+                      Tasks
                     </div>
                   </div>
                   <div className="rounded-lg bg-zinc-900/50 p-3 text-center">
@@ -166,6 +173,18 @@ export default function ComputePage() {
                     </div>
                   </div>
                 </div>
+
+                {/* P2P connections */}
+                {peerConnections.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/30 p-3">
+                    <div className="flex items-center gap-2 text-xs text-zinc-400">
+                      <div className="h-2 w-2 rounded-full bg-blue-400" />
+                      <span>{peerConnections.length} P2P connection{peerConnections.length > 1 ? "s" : ""}</span>
+                      <span className="text-zinc-600">|</span>
+                      <span className="text-zinc-500">Direct browser-to-browser</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <Button
@@ -180,6 +199,55 @@ export default function ComputePage() {
         </CardContent>
       </Card>
 
+      {/* Pipeline visualization */}
+      {training?.pipeline_active && (
+        <Card className="mb-6 border-zinc-800 bg-zinc-900/50">
+          <CardContent className="pt-6">
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-400">
+              Pipeline Topology
+            </h3>
+            <div className="flex items-center gap-1 overflow-x-auto pb-2">
+              <div className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-2 text-center">
+                <div className="text-[10px] font-medium text-zinc-400">Server</div>
+                <div className="text-[10px] text-zinc-500">embed</div>
+              </div>
+              {Array.from({ length: training.pipeline_stages }, (_, i) => {
+                const layersPerStage = Math.ceil(12 / training.pipeline_stages);
+                const start = i * layersPerStage;
+                const end = Math.min(start + layersPerStage, 12);
+                const isMyStage = pipelineAssignment &&
+                  pipelineAssignment.startLayer === start &&
+                  pipelineAssignment.endLayer === end;
+                return (
+                  <div key={i} className="flex items-center gap-1">
+                    <div className="text-zinc-600 text-xs">&#8594;</div>
+                    <div
+                      className={`shrink-0 rounded-lg border px-3 py-2 text-center ${
+                        isMyStage
+                          ? "border-amber-700 bg-amber-900/30"
+                          : "border-zinc-700 bg-zinc-800/50"
+                      }`}
+                    >
+                      <div className={`text-[10px] font-medium ${isMyStage ? "text-amber-400" : "text-zinc-400"}`}>
+                        {isMyStage ? "You" : `Peer ${i + 1}`}
+                      </div>
+                      <div className="text-[10px] text-zinc-500">
+                        L{start}-{end - 1}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="text-zinc-600 text-xs">&#8594;</div>
+              <div className="shrink-0 rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-2 text-center">
+                <div className="text-[10px] font-medium text-zinc-400">Server</div>
+                <div className="text-[10px] text-zinc-500">head</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Collective status */}
       <Card className="mb-6 border-zinc-800 bg-zinc-900/50">
         <CardContent className="pt-6">
@@ -187,11 +255,18 @@ export default function ComputePage() {
             <h3 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
               The Collective
             </h3>
-            {training?.is_training && (
-              <Badge variant="secondary" className="bg-emerald-900/30 text-emerald-400 border-emerald-800 text-[10px]">
-                Training Active
-              </Badge>
-            )}
+            <div className="flex gap-2">
+              {training?.pipeline_active && (
+                <Badge variant="secondary" className="bg-purple-900/30 text-purple-400 border-purple-800 text-[10px]">
+                  Pipeline Mode
+                </Badge>
+              )}
+              {training?.is_training && (
+                <Badge variant="secondary" className="bg-emerald-900/30 text-emerald-400 border-emerald-800 text-[10px]">
+                  Training Active
+                </Badge>
+              )}
+            </div>
           </div>
 
           {/* Collective Intelligence meter */}
@@ -247,9 +322,9 @@ export default function ComputePage() {
             </div>
             <div>
               <div className="text-lg font-bold tabular-nums">
-                v{training?.model_version ?? 1}
+                {training?.pipeline_stages ?? 0}
               </div>
-              <div className="text-xs text-zinc-500">Model version</div>
+              <div className="text-xs text-zinc-500">Pipeline stages</div>
             </div>
           </div>
           {training && training.current_step > 0 && (
@@ -267,7 +342,7 @@ export default function ComputePage() {
         </CardContent>
       </Card>
 
-      {/* How it works - collapsed */}
+      {/* How it works */}
       <details className="group rounded-lg border border-zinc-800 bg-zinc-900/50">
         <summary className="cursor-pointer px-6 py-4 text-sm font-medium text-zinc-400 hover:text-white transition-colors">
           How your contribution works
@@ -277,19 +352,19 @@ export default function ComputePage() {
             {[
               {
                 icon: "01",
-                text: "Each FFN layer is split into 4 expert slices \u2014 the server always runs 1 locally (25% baseline)",
+                text: "With 1 browser: FFN layers split into 4 expert slices. Server runs 1 locally (25% baseline), your browser runs the rest.",
               },
               {
                 icon: "02",
-                text: "Your browser computes additional expert slices using WebGPU \u2014 more browsers = smarter model",
+                text: "With 2+ browsers: full pipeline mode. Each browser handles a range of transformer layers, passing activations to the next.",
               },
               {
                 icon: "03",
-                text: "Expert outputs are summed \u2014 with all 4 active, the result is mathematically identical to the full model",
+                text: "With 4+ browsers: direct P2P via WebRTC. Activations flow browser-to-browser, bypassing the server for maximum speed.",
               },
               {
                 icon: "04",
-                text: "You earn tokens for every expert slice computed \u2014 fair exchange for collective intelligence",
+                text: "Weights persist in IndexedDB. Close your tab and come back — no re-download needed. You earn tokens for every computation.",
               },
             ].map((step) => (
               <div key={step.icon} className="flex gap-3 text-sm">

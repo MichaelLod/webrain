@@ -231,6 +231,68 @@ async def generate_text_hybrid(
             yield tokenizer.decode([next_token.item()])
 
 
+async def generate_text_pipeline(
+    prompt: str,
+    max_tokens: int = 200,
+    temperature: float = 0.8,
+    image: torch.Tensor | None = None,
+) -> AsyncGenerator[str, None]:
+    """Pipeline-parallel text generation — full layers distributed across browsers.
+
+    Uses pipeline parallelism when 2+ peers are available, with each peer
+    handling a range of transformer layers. Falls back to swarm or local mode.
+    """
+    model = get_model()
+    tokenizer = _get_tokenizer()
+    tokens = tokenizer.encode(prompt)
+    if not tokens:
+        tokens = [0]
+
+    cfg = model.cfg
+    image_embeds = None
+    if image is not None:
+        vision_enc = get_vision_encoder()
+        with torch.no_grad():
+            image_embeds = vision_enc(image.unsqueeze(0))
+        n_vision = image_embeds.shape[1]
+        max_text_len = cfg.max_seq_len - n_vision
+    else:
+        max_text_len = cfg.max_seq_len
+
+    tokens = tokens[-max_text_len:]
+    idx = torch.tensor([tokens], dtype=torch.long)
+
+    try:
+        from app.services.compute_service import manager
+        pipeline_inference = manager.pipeline_inference
+        scheduler = manager.pipeline_scheduler
+        registry = manager.shard_registry
+    except Exception:
+        # No compute manager — fall back to local
+        async for tok in generate_text_swarm(prompt, max_tokens, temperature, image):
+            yield tok
+        return
+
+    with torch.no_grad():
+        logits, kv_caches = await pipeline_inference.forward_pipeline(
+            model, idx, scheduler, registry, image_embeds=image_embeds,
+        )
+        logits = logits[:, -1, :] / temperature
+        probs = torch.softmax(logits, dim=-1)
+        next_token = torch.multinomial(probs, num_samples=1)
+        yield tokenizer.decode([next_token.item()])
+
+        # Decode — local for single tokens
+        seq_len = idx.shape[1] + (image_embeds.shape[1] if image_embeds is not None else 0)
+        for _ in range(max_tokens - 1):
+            logits, kv_caches = model(next_token, kv_caches=kv_caches, start_pos=seq_len)
+            seq_len += 1
+            logits = logits[:, -1, :] / temperature
+            probs = torch.softmax(logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)
+            yield tokenizer.decode([next_token.item()])
+
+
 async def generate_text_swarm(
     prompt: str,
     max_tokens: int = 200,

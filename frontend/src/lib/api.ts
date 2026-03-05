@@ -197,6 +197,8 @@ export interface TrainingStatus {
   is_training: boolean;
   collective_intelligence: number;
   active_experts: number;
+  pipeline_stages: number;
+  pipeline_active: boolean;
 }
 
 export interface ModelInfo {

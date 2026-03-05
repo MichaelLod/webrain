@@ -10,6 +10,7 @@ from app.core.database import Base, engine, async_session
 from app.core.redis import close_redis, enqueue_ingest
 from app.api.v1 import auth, tokens, compute, chat, leaderboard, data
 from app.models.data_submission import DataSubmission, SubmissionStatus
+from app.services.weight_server import router as weight_router
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ app.include_router(compute.router, prefix="/api/v1/compute", tags=["compute"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
 app.include_router(leaderboard.router, prefix="/api/v1/leaderboard", tags=["leaderboard"])
 app.include_router(data.router, prefix="/api/v1/data", tags=["data"])
+app.include_router(weight_router, prefix="/api/v1/weights", tags=["weights"])
 
 
 @app.get("/api/health")

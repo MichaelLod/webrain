@@ -444,6 +444,37 @@ Join us at [webrain.dev](https://webrain.dev) to contribute your compute.
         for group in self.optimizer.param_groups:
             group["lr"] = lr
 
+    def get_layer_parameters(self, start_layer: int, end_layer: int) -> dict[str, torch.Tensor]:
+        """Returns parameter tensors for a range of layers."""
+        params = {}
+        blocks = list(self.model.blocks)
+        for i in range(start_layer, min(end_layer, len(blocks))):
+            for name, param in blocks[i].named_parameters():
+                params[f"blocks.{i}.{name}"] = param
+        return params
+
+    def apply_gradients(self, grad_dict: dict[str, torch.Tensor]):
+        """Apply externally computed gradients to model parameters."""
+        for name, grad in grad_dict.items():
+            parts = name.split(".")
+            param = self.model
+            for part in parts:
+                if part.isdigit():
+                    param = list(param)[int(part)]
+                else:
+                    param = getattr(param, part)
+            if hasattr(param, "grad") and param.grad is not None:
+                param.grad += grad.to(param.device)
+            else:
+                param.grad = grad.to(param.device)
+
+    def save_sharded_checkpoint(self):
+        """Save model as sharded checkpoint for progressive download."""
+        from app.ml.sharded_checkpoint import ShardedCheckpoint
+        from app.core.config import LAYERS_PER_SHARD
+        shards_dir = os.path.join(CHECKPOINT_DIR, "shards")
+        ShardedCheckpoint.save_sharded(self.model, shards_dir, LAYERS_PER_SHARD)
+
     async def run_training_step(self, dispatch_fn) -> float:
         await self.check_training_ready_queue()
         self.model.train()
@@ -495,6 +526,11 @@ Join us at [webrain.dev](https://webrain.dev) to contribute your compute.
 
         if self.step % 50 == 0:
             self.save_checkpoint()
+            if self.step % 200 == 0:
+                try:
+                    self.save_sharded_checkpoint()
+                except Exception as e:
+                    log.debug("Sharded checkpoint save failed: %s", e)
 
         if vision_data is not None:
             await self._mark_vision_trained(sub_ids)

@@ -28,6 +28,10 @@ HF_TOKEN = os.getenv("HF_TOKEN", "")
 
 CHAT_IMAGE_COST = 20
 
+# Pipeline / P2P
+LAYERS_PER_SHARD = int(os.getenv("LAYERS_PER_SHARD", "3"))
+ENABLE_FP16_TRANSFER = os.getenv("ENABLE_FP16_TRANSFER", "true").lower() == "true"
+
 # Model architecture
 MODEL_VERSION = int(os.getenv("MODEL_VERSION", "2"))
 VOCAB_SIZE = int(os.getenv("VOCAB_SIZE", "8192"))

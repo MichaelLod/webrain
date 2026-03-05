@@ -27,6 +27,8 @@ class TrainingStatusResponse(BaseModel):
     is_training: bool
     collective_intelligence: float
     active_experts: int
+    pipeline_stages: int
+    pipeline_active: bool
 
 
 class ModelInfoResponse(BaseModel):
@@ -87,6 +89,8 @@ async def get_training_status():
         is_training=manager.is_training,
         collective_intelligence=swarm.collective_intelligence if swarm else 0.25,
         active_experts=swarm.active_experts if swarm else 1,
+        pipeline_stages=manager.pipeline_stages,
+        pipeline_active=manager.pipeline_active,
     )
 
 
