@@ -64,14 +64,20 @@ export default function ComputePage() {
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
+  const networkMode = training?.pipeline_active
+    ? "Pipeline"
+    : (training?.connected_workers ?? 0) > 0
+      ? "Swarm"
+      : "Server Only";
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
       {/* Header */}
       <div className="mb-8 text-center">
-        <h1 className="mb-2 text-3xl font-bold">Contribute Your Power</h1>
+        <h1 className="mb-2 text-3xl font-bold">Join the Network</h1>
         <p className="text-zinc-500">
-          Your GPU, our model. Every computation you run makes the collective
-          smarter.
+          Your browser becomes a node. Transformer layers run on your GPU,
+          activations flow peer-to-peer.
         </p>
       </div>
 
@@ -95,7 +101,7 @@ export default function ComputePage() {
               />
               <div>
                 <div className="text-sm font-medium">
-                  {running ? "Contributing" : supported ? "Ready" : "Unavailable"}
+                  {running ? "Node Active" : supported ? "Ready" : "Unavailable"}
                 </div>
                 <div className="text-xs text-zinc-500 font-mono">
                   {gpuInfo || "Detecting GPU..."}
@@ -105,7 +111,21 @@ export default function ComputePage() {
             <div className="flex items-center gap-2">
               {pipelineAssignment && (
                 <Badge className="bg-purple-900/50 text-purple-400 border-purple-800 text-[10px]">
-                  Layers {pipelineAssignment.startLayer}-{pipelineAssignment.endLayer - 1}
+                  Layers {pipelineAssignment.startLayer}–{pipelineAssignment.endLayer - 1}
+                </Badge>
+              )}
+              {running && (
+                <Badge
+                  variant="secondary"
+                  className={
+                    training?.pipeline_active
+                      ? "bg-purple-900/30 text-purple-400 border-purple-800 text-[10px]"
+                      : (training?.connected_workers ?? 0) > 0
+                        ? "bg-amber-900/30 text-amber-400 border-amber-800 text-[10px]"
+                        : "bg-zinc-800 text-zinc-500 text-[10px]"
+                  }
+                >
+                  {networkMode}
                 </Badge>
               )}
               <Badge
@@ -125,7 +145,7 @@ export default function ComputePage() {
               size="lg"
               className="w-full bg-amber-600 py-6 text-lg font-semibold hover:bg-amber-500 disabled:opacity-40"
             >
-              {!supported ? "WebGPU Not Available" : "Start Contributing"}
+              {!supported ? "WebGPU Not Available" : "Start Node"}
             </Button>
           ) : (
             <div className="space-y-6">
@@ -138,7 +158,9 @@ export default function ComputePage() {
                       <div className="h-2.5 w-2.5 rounded-full bg-amber-500" />
                     </div>
                     <span className="text-sm font-medium text-amber-400">
-                      Your GPU is powering the people&apos;s AI
+                      {pipelineAssignment
+                        ? `Running layers ${pipelineAssignment.startLayer}–${pipelineAssignment.endLayer - 1}`
+                        : "Processing forward passes"}
                     </span>
                   </div>
                   <span className="font-mono text-xs text-zinc-500">
@@ -153,7 +175,7 @@ export default function ComputePage() {
                       {tasksCompleted}
                     </div>
                     <div className="text-[11px] text-zinc-500 uppercase tracking-wider">
-                      Tasks
+                      Forwards
                     </div>
                   </div>
                   <div className="rounded-lg bg-zinc-900/50 p-3 text-center">
@@ -178,8 +200,10 @@ export default function ComputePage() {
                 {peerConnections.length > 0 && (
                   <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/30 p-3">
                     <div className="flex items-center gap-2 text-xs text-zinc-400">
-                      <div className="h-2 w-2 rounded-full bg-blue-400" />
-                      <span>{peerConnections.length} P2P connection{peerConnections.length > 1 ? "s" : ""}</span>
+                      <div className="h-2 w-2 rounded-full bg-blue-400 animate-pulse" />
+                      <span className="font-medium text-blue-400">
+                        {peerConnections.length} peer{peerConnections.length > 1 ? "s" : ""} connected via WebRTC
+                      </span>
                       <span className="text-zinc-600">|</span>
                       <span className="text-zinc-500">Direct browser-to-browser</span>
                     </div>
@@ -192,7 +216,7 @@ export default function ComputePage() {
                 variant="outline"
                 className="w-full border-zinc-700"
               >
-                Stop Contributing
+                Leave Network
               </Button>
             </div>
           )}
@@ -213,14 +237,22 @@ export default function ComputePage() {
               </div>
               {Array.from({ length: training.pipeline_stages }, (_, i) => {
                 const layersPerStage = Math.ceil(12 / training.pipeline_stages);
-                const start = i * layersPerStage;
-                const end = Math.min(start + layersPerStage, 12);
+                const stageStart = i * layersPerStage;
+                const stageEnd = Math.min(stageStart + layersPerStage, 12);
                 const isMyStage = pipelineAssignment &&
-                  pipelineAssignment.startLayer === start &&
-                  pipelineAssignment.endLayer === end;
+                  pipelineAssignment.startLayer === stageStart &&
+                  pipelineAssignment.endLayer === stageEnd;
+                const hasPeer = peerConnections.length > 0 && i > 0;
                 return (
                   <div key={i} className="flex items-center gap-1">
-                    <div className="text-zinc-600 text-xs">&#8594;</div>
+                    <div className="flex flex-col items-center">
+                      <div className={`text-xs ${hasPeer ? "text-blue-400" : "text-zinc-600"}`}>
+                        &#8594;
+                      </div>
+                      {hasPeer && (
+                        <div className="text-[8px] text-blue-400/60">P2P</div>
+                      )}
+                    </div>
                     <div
                       className={`shrink-0 rounded-lg border px-3 py-2 text-center ${
                         isMyStage
@@ -232,7 +264,7 @@ export default function ComputePage() {
                         {isMyStage ? "You" : `Peer ${i + 1}`}
                       </div>
                       <div className="text-[10px] text-zinc-500">
-                        L{start}-{end - 1}
+                        L{stageStart}–{stageEnd - 1}
                       </div>
                     </div>
                   </div>
@@ -253,17 +285,24 @@ export default function ComputePage() {
         <CardContent className="pt-6">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
-              The Collective
+              Network Status
             </h3>
             <div className="flex gap-2">
-              {training?.pipeline_active && (
-                <Badge variant="secondary" className="bg-purple-900/30 text-purple-400 border-purple-800 text-[10px]">
-                  Pipeline Mode
-                </Badge>
-              )}
+              <Badge
+                variant="secondary"
+                className={
+                  training?.pipeline_active
+                    ? "bg-purple-900/30 text-purple-400 border-purple-800 text-[10px]"
+                    : (training?.connected_workers ?? 0) > 0
+                      ? "bg-amber-900/30 text-amber-400 border-amber-800 text-[10px]"
+                      : "bg-zinc-800 text-zinc-500 text-[10px]"
+                }
+              >
+                {networkMode}
+              </Badge>
               {training?.is_training && (
                 <Badge variant="secondary" className="bg-emerald-900/30 text-emerald-400 border-emerald-800 text-[10px]">
-                  Training Active
+                  Training
                 </Badge>
               )}
             </div>
@@ -295,8 +334,8 @@ export default function ComputePage() {
               </span>
               <span>
                 {(training?.connected_workers ?? 0) === 0
-                  ? "Server only"
-                  : `${training?.connected_workers} browser${(training?.connected_workers ?? 0) > 1 ? "s" : ""} contributing`}
+                  ? "No peers — server only"
+                  : `${training?.connected_workers} node${(training?.connected_workers ?? 0) > 1 ? "s" : ""} in network`}
               </span>
             </div>
           </div>
@@ -306,25 +345,25 @@ export default function ComputePage() {
               <div className="text-lg font-bold tabular-nums">
                 {training?.connected_workers ?? 0}
               </div>
-              <div className="text-xs text-zinc-500">Contributors online</div>
-            </div>
-            <div>
-              <div className="text-lg font-bold tabular-nums">
-                {training?.current_step?.toLocaleString() ?? 0}
-              </div>
-              <div className="text-xs text-zinc-500">Training steps</div>
-            </div>
-            <div>
-              <div className="text-lg font-bold tabular-nums text-emerald-400">
-                {training?.current_loss?.toFixed(4) ?? "N/A"}
-              </div>
-              <div className="text-xs text-zinc-500">Loss (lower = smarter)</div>
+              <div className="text-xs text-zinc-500">Nodes online</div>
             </div>
             <div>
               <div className="text-lg font-bold tabular-nums">
                 {training?.pipeline_stages ?? 0}
               </div>
               <div className="text-xs text-zinc-500">Pipeline stages</div>
+            </div>
+            <div>
+              <div className="text-lg font-bold tabular-nums text-emerald-400">
+                {training?.current_loss?.toFixed(4) ?? "N/A"}
+              </div>
+              <div className="text-xs text-zinc-500">Loss</div>
+            </div>
+            <div>
+              <div className="text-lg font-bold tabular-nums">
+                {training?.current_step?.toLocaleString() ?? 0}
+              </div>
+              <div className="text-xs text-zinc-500">Training steps</div>
             </div>
           </div>
           {training && training.current_step > 0 && (
@@ -345,26 +384,26 @@ export default function ComputePage() {
       {/* How it works */}
       <details className="group rounded-lg border border-zinc-800 bg-zinc-900/50">
         <summary className="cursor-pointer px-6 py-4 text-sm font-medium text-zinc-400 hover:text-white transition-colors">
-          How your contribution works
+          How the P2P network works
         </summary>
         <div className="border-t border-zinc-800 px-6 py-4">
           <div className="grid gap-3 sm:grid-cols-2">
             {[
               {
                 icon: "01",
-                text: "With 1 browser: FFN layers split into 4 expert slices. Server runs 1 locally (25% baseline), your browser runs the rest.",
+                text: "Your browser loads transformer layers and runs forward passes via WebGPU. Weights persist in IndexedDB — no re-download on return.",
               },
               {
                 icon: "02",
-                text: "With 2+ browsers: full pipeline mode. Each browser handles a range of transformer layers, passing activations to the next.",
+                text: "With 1 node: swarm mode. FFN split into 4 expert slices — you run 3, server runs 1. Intelligence scales from 25% to 100%.",
               },
               {
                 icon: "03",
-                text: "With 4+ browsers: direct P2P via WebRTC. Activations flow browser-to-browser, bypassing the server for maximum speed.",
+                text: "With 2+ nodes: pipeline mode. Each browser handles a range of layers. Activations flow through the pipeline.",
               },
               {
                 icon: "04",
-                text: "Weights persist in IndexedDB. Close your tab and come back — no re-download needed. You earn tokens for every computation.",
+                text: "With 4+ nodes: full P2P via WebRTC. Activations flow directly browser-to-browser, bypassing the server entirely.",
               },
             ].map((step) => (
               <div key={step.icon} className="flex gap-3 text-sm">

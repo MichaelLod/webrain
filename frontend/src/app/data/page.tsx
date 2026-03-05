@@ -68,9 +68,9 @@ export default function DataPage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
       <div className="mb-8 text-center">
-        <h1 className="mb-2 text-3xl font-bold">Feed the Collective</h1>
+        <h1 className="mb-2 text-3xl font-bold">Feed the Network</h1>
         <p className="text-zinc-500">
-          Submit links to public content. The model learns from what the community provides.
+          Submit links to public content. The distributed model trains on what the community provides.
         </p>
       </div>
 
@@ -150,7 +150,7 @@ export default function DataPage() {
             </div>
             <p className="text-[11px] text-zinc-600">
               By submitting, you confirm this content is either publicly available or owned by you.
-              Submitted data will be used to train the collective&apos;s model.
+              Submitted data will be used to train the distributed model.
             </p>
           </form>
         </CardContent>

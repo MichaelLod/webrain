@@ -164,13 +164,13 @@ export default function ChatPage() {
                   Talk to the collective
                 </h2>
                 <p className="mb-4 text-sm text-zinc-500 leading-relaxed">
-                  This model is built entirely by people contributing their browser compute.
-                  It gets smarter with every tile computed. Try asking it something.
+                  This model is distributed across browser nodes. Each peer runs real
+                  transformer layers via WebGPU. It gets smarter with every node that joins.
                 </p>
                 {training && (
                   <div className="inline-flex items-center gap-4 rounded-lg border border-zinc-800 bg-zinc-900/80 px-4 py-2 text-xs text-zinc-500">
                     <span>
-                      <span className="text-zinc-400">{training.connected_workers}</span> contributors
+                      <span className="text-zinc-400">{training.connected_workers}</span> nodes
                     </span>
                     <span className="text-zinc-700">·</span>
                     <span>
@@ -261,7 +261,7 @@ export default function ChatPage() {
                 variant="outline"
                 className="border-amber-800 text-amber-400 hover:bg-amber-900/30"
               >
-                Earn tokens by contributing
+                Earn tokens by running a node
               </Button>
             </Link>
           </div>

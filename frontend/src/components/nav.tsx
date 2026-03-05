@@ -36,7 +36,7 @@ export function Nav() {
           {user && (
             <>
               {navLink("/dashboard", "Dashboard")}
-              {navLink("/compute", "Contribute")}
+              {navLink("/compute", "Network")}
               {navLink("/chat", "Chat")}
               {navLink("/leaderboard", "Leaderboard")}
               {navLink("/data", "Data")}

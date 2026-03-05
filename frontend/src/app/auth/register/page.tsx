@@ -39,9 +39,9 @@ export default function RegisterPage() {
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600">
             <span className="text-xl font-black text-white">W</span>
           </div>
-          <h1 className="mb-1 text-2xl font-bold">Join the collective</h1>
+          <h1 className="mb-1 text-2xl font-bold">Join the network</h1>
           <p className="text-sm text-zinc-500">
-            Your browser, your contribution, your AI.
+            Your browser becomes a node. Your GPU runs real transformer layers.
           </p>
         </div>
 

@@ -40,7 +40,7 @@ export default function LoginPage() {
           </div>
           <h1 className="mb-1 text-2xl font-bold">Welcome back</h1>
           <p className="text-sm text-zinc-500">
-            The collective missed you.
+            The network missed you.
           </p>
         </div>
 
